@@ -11,69 +11,109 @@
 
 (function () {
   // ═════════════════════════════════════════════════════════════
+  // 🛡️ 전역 에러 핸들러 (v2.2)
+  // ═════════════════════════════════════════════════════════════
+  window.addEventListener('error', (e) => {
+    console.error('[GlobalError]', e.message, 'at', e.filename + ':' + e.lineno + ':' + e.colno, e.error)
+    try { toast('⚠️ JS 오류: ' + (e.message || '알 수 없음'), 'error') } catch {}
+  })
+  window.addEventListener('unhandledrejection', (e) => {
+    console.error('[UnhandledRejection]', e.reason)
+    try { toast('⚠️ 비동기 오류: ' + (e.reason?.message || e.reason || '알 수 없음'), 'error') } catch {}
+  })
+
+  // ═════════════════════════════════════════════════════════════
+  // 🌐 안전한 fetch 헬퍼 (v2.2)
+  // - 401 시 자동 로그인 리다이렉트
+  // - 비 2xx 응답 시 서버 에러 메시지 파싱
+  // - 네트워크/파싱 에러를 { error } 객체로 반환 (throw 하지 않음)
+  // ═════════════════════════════════════════════════════════════
+  async function safeFetch(url, options = {}) {
+    try {
+      const r = await fetch(url, options)
+      if (r.status === 401) {
+        console.warn('[safeFetch] 세션 만료 — 로그인 페이지로 이동')
+        location.href = '/login'
+        return { error: '세션 만료' }
+      }
+      // JSON 파싱 시도
+      const text = await r.text()
+      let data = {}
+      if (text) {
+        try { data = JSON.parse(text) } catch {
+          return { error: `서버 응답 파싱 실패 (HTTP ${r.status}): ${text.slice(0, 200)}` }
+        }
+      }
+      if (!r.ok) {
+        return { ...data, error: data.error || `HTTP ${r.status}` }
+      }
+      return data
+    } catch (e) {
+      console.error('[safeFetch] network error', url, e)
+      return { error: '네트워크 오류: ' + (e?.message || e) }
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════════
   // API 래퍼
   // ═════════════════════════════════════════════════════════════
   const api = {
-    list: () => fetch('/api/admin/sources').then((r) => r.json()),
-    presets: () => fetch('/api/admin/presets').then((r) => r.json()),
+    list: () => safeFetch('/api/admin/sources'),
+    presets: () => safeFetch('/api/admin/presets'),
     add: (payload) =>
-      fetch('/api/admin/sources', {
+      safeFetch('/api/admin/sources', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      }).then((r) => r.json()),
+      }),
     remove: (id) =>
-      fetch('/api/admin/sources/' + encodeURIComponent(id), { method: 'DELETE' }).then((r) =>
-        r.json()
-      ),
+      safeFetch('/api/admin/sources/' + encodeURIComponent(id), { method: 'DELETE' }),
     patch: (id, patch) =>
-      fetch('/api/admin/sources/' + encodeURIComponent(id), {
+      safeFetch('/api/admin/sources/' + encodeURIComponent(id), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
-      }).then((r) => r.json()),
+      }),
     test: (payload) =>
-      fetch('/api/admin/test-source', {
+      safeFetch('/api/admin/test-source', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      }).then((r) => r.json()),
+      }),
     resetDefaults: () =>
-      fetch('/api/admin/sources/reset-defaults', { method: 'POST' }).then((r) => r.json()),
+      safeFetch('/api/admin/sources/reset-defaults', { method: 'POST' }),
   }
 
   const recipientApi = {
-    list: () => fetch('/api/admin/recipients').then((r) => r.json()),
+    list: () => safeFetch('/api/admin/recipients'),
     add: (email, label) =>
-      fetch('/api/admin/recipients', {
+      safeFetch('/api/admin/recipients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, label }),
-      }).then((r) => r.json()),
+      }),
     remove: (id) =>
-      fetch('/api/admin/recipients/' + encodeURIComponent(id), { method: 'DELETE' }).then((r) =>
-        r.json()
-      ),
+      safeFetch('/api/admin/recipients/' + encodeURIComponent(id), { method: 'DELETE' }),
     patch: (id, patch) =>
-      fetch('/api/admin/recipients/' + encodeURIComponent(id), {
+      safeFetch('/api/admin/recipients/' + encodeURIComponent(id), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
-      }).then((r) => r.json()),
+      }),
   }
 
   // ═════════════════════════════════════════════════════════════
   // 🚀 "지금 발송" API
   // ═════════════════════════════════════════════════════════════
   const triggerApi = {
-    status: () => fetch('/api/admin/trigger-status').then((r) => r.json()),
+    status: () => safeFetch('/api/admin/trigger-status'),
     run: (dryRun) =>
-      fetch('/api/admin/trigger-now', {
+      safeFetch('/api/admin/trigger-now', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dryRun }),
-      }).then((r) => r.json()),
-    recentRuns: () => fetch('/api/admin/recent-runs').then((r) => r.json()),
+      }),
+    recentRuns: () => safeFetch('/api/admin/recent-runs'),
   }
 
   // ═════════════════════════════════════════════════════════════
@@ -84,6 +124,8 @@
   let presetCatalog = []
   // 편집 중인 소스: null = 새 소스 추가 모드
   let editingSource = null
+  // 편집 모달 열려있는지 (실시간 동기화에서 재로딩 방지용)
+  let isEditingModal = false
 
   // ═════════════════════════════════════════════════════════════
   // 유틸
@@ -272,21 +314,38 @@
     const action = btn.dataset.action
     const target = allSources.find((s) => s.id === id)
 
-    if (action === 'toggle') {
-      await api.patch(id, { enabled: !target.enabled })
+    if (!target) {
+      console.warn('[onSourceAction] target not found for id:', id, 'action:', action)
+      toast('⚠️ 소스를 찾을 수 없습니다. 새로고침합니다…', 'warn')
       await reload()
-    } else if (action === 'edit') {
-      openEditModal(target)
-    } else if (action === 'test') {
-      await runQuickTest(target)
-    } else if (action === 'delete') {
-      const warn = target.builtin
-        ? `[기본 소스] "${target.label}"을(를) 삭제하시겠습니까?\n('기본값 복원' 버튼으로 다시 불러올 수 있습니다.)`
-        : `"${target.label}"을(를) 삭제하시겠습니까?`
-      if (!confirm(warn)) return
-      await api.remove(id)
-      await reload()
-      toast(`🗑️ <strong>${escapeHtml(target.label)}</strong> 삭제됨`, 'success')
+      return
+    }
+
+    try {
+      if (action === 'toggle') {
+        const res = await api.patch(id, { enabled: !target.enabled })
+        if (res?.error) return toast('❌ ' + res.error, 'error')
+        await reload()
+        // 🔄 다른 탭으로 변경사항 브로드캐스트
+        notifyOtherTabs('sources')
+      } else if (action === 'edit') {
+        openEditModal(target)
+      } else if (action === 'test') {
+        await runQuickTest(target)
+      } else if (action === 'delete') {
+        const warn = target.builtin
+          ? `[기본 소스] "${target.label}"을(를) 삭제하시겠습니까?\n('기본값 복원' 버튼으로 다시 불러올 수 있습니다.)`
+          : `"${target.label}"을(를) 삭제하시겠습니까?`
+        if (!confirm(warn)) return
+        const res = await api.remove(id)
+        if (res?.error) return toast('❌ ' + res.error, 'error')
+        await reload()
+        notifyOtherTabs('sources')
+        toast(`🗑️ <strong>${escapeHtml(target.label)}</strong> 삭제됨`, 'success')
+      }
+    } catch (err) {
+      console.error('[onSourceAction]', action, err)
+      toast('❌ 작업 실패: ' + (err?.message || err), 'error')
     }
   }
 
@@ -323,37 +382,62 @@
 
   function openAddModal() {
     editingSource = null
-    modalTitle.textContent = '새 소스 추가'
-    renderModalBody({
-      id: '',
-      label: '',
-      category: 'custom',
-      type: 'google_news',
-      url: '',
-      site: '',
-      queries: [],
-      defaultLimit: 5,
-      enabled: true,
-      builtin: false,
-    })
-    modal.classList.remove('hidden')
+    isEditingModal = true
+    if (modalTitle) modalTitle.textContent = '새 소스 추가'
+    try {
+      renderModalBody({
+        id: '',
+        label: '',
+        category: 'custom',
+        type: 'google_news',
+        url: '',
+        site: '',
+        queries: [],
+        defaultLimit: 5,
+        enabled: true,
+        builtin: false,
+      })
+      modal.classList.remove('hidden')
+    } catch (e) {
+      console.error('[openAddModal] render failed:', e)
+      toast('❌ 모달 렌더링 실패: ' + (e?.message || e), 'error')
+      isEditingModal = false
+    }
   }
 
   function openEditModal(source) {
+    if (!source || typeof source !== 'object') {
+      console.error('[openEditModal] invalid source:', source)
+      toast('❌ 소스 데이터를 찾을 수 없습니다. 새로고침해주세요.', 'error')
+      return
+    }
     editingSource = source
-    modalTitle.textContent = `편집 — ${source.label}`
-    renderModalBody(source)
-    modal.classList.remove('hidden')
+    isEditingModal = true
+    if (modalTitle) modalTitle.textContent = `편집 — ${source.label || '(이름없음)'}`
+    try {
+      renderModalBody(source)
+      modal.classList.remove('hidden')
+    } catch (e) {
+      console.error('[openEditModal] render failed for:', source, e)
+      toast('❌ 편집 모달 오류: ' + (e?.message || e), 'error')
+      isEditingModal = false
+    }
   }
 
   function closeModal() {
     modal.classList.add('hidden')
     editingSource = null
+    isEditingModal = false
   }
 
   function renderModalBody(s) {
-    const queriesHtml = (s.queries || [])
-      .map((q, i) => queryRowHtml(q.keyword, q.limit, i))
+    // 안전 정규화: undefined/null 방어
+    s = s || {}
+    const safeQueries = Array.isArray(s.queries) ? s.queries : []
+    const safePresets = Array.isArray(presetCatalog) ? presetCatalog : []
+
+    const queriesHtml = safeQueries
+      .map((q, i) => queryRowHtml(q?.keyword || '', q?.limit || 3, i))
       .join('')
 
     modalBody.innerHTML = `
@@ -402,7 +486,7 @@
             <div class="flex gap-1">
               <select id="m_preset_select" class="text-xs px-2 py-1 border border-gray-300 rounded">
                 <option value="">📋 프리셋 적용...</option>
-                ${presetCatalog.map((p) => `<option value="${p.id}">${escapeHtml(p.label)}</option>`).join('')}
+                ${safePresets.map((p) => `<option value="${p.id}">${escapeHtml(p.label)}</option>`).join('')}
               </select>
               <button type="button" id="m_add_query" class="text-xs px-2 py-1 bg-sky-100 text-sky-700 rounded hover:bg-sky-200">
                 <i class="fa-solid fa-plus"></i> 검색어 추가
@@ -583,9 +667,10 @@
         defaultLimit: p.defaultLimit,
         enabled: p.enabled,
       })
-      if (res.error) return toast('❌ ' + res.error, 'error')
+      if (res?.error) return toast('❌ ' + res.error, 'error')
       closeModal()
       await reload()
+      notifyOtherTabs('sources')
       toast(`💾 <strong>${escapeHtml(p.label)}</strong> 저장됨`, 'success')
     } else {
       // 신규 추가 (POST) — category 는 서버가 'custom' 으로 강제
@@ -595,13 +680,14 @@
         queries: p.queries,
         defaultLimit: p.defaultLimit,
       })
-      if (res.error) return toast('❌ ' + res.error, 'error')
+      if (res?.error) return toast('❌ ' + res.error, 'error')
       // site/enabled 를 이어서 PATCH (서버가 초기값 설정 안 한 필드 반영)
-      if (p.site || p.enabled === false) {
+      if (res.source?.id && (p.site || p.enabled === false)) {
         await api.patch(res.source.id, { site: p.site, enabled: p.enabled })
       }
       closeModal()
       await reload()
+      notifyOtherTabs('sources')
       toast(`✨ <strong>${escapeHtml(p.label)}</strong> 추가됨`, 'success')
     }
   }
@@ -656,14 +742,23 @@
     const btn = e.currentTarget
     const id = btn.dataset.rid
     const action = btn.dataset.raction
-    if (action === 'toggle') {
-      const enabled = btn.dataset.renabled !== 'true'
-      await recipientApi.patch(id, { enabled })
-      await reloadRecipients()
-    } else if (action === 'delete') {
-      if (!confirm('이 수신자를 삭제할까요?')) return
-      await recipientApi.remove(id)
-      await reloadRecipients()
+    try {
+      if (action === 'toggle') {
+        const enabled = btn.dataset.renabled !== 'true'
+        const res = await recipientApi.patch(id, { enabled })
+        if (res?.error) return toast('❌ ' + res.error, 'error')
+        await reloadRecipients()
+        notifyOtherTabs('recipients')
+      } else if (action === 'delete') {
+        if (!confirm('이 수신자를 삭제할까요?')) return
+        const res = await recipientApi.remove(id)
+        if (res?.error) return toast('❌ ' + res.error, 'error')
+        await reloadRecipients()
+        notifyOtherTabs('recipients')
+      }
+    } catch (err) {
+      console.error('[onRecipientAction]', err)
+      toast('❌ 작업 실패: ' + (err?.message || err), 'error')
     }
   }
 
@@ -720,8 +815,9 @@
       if (res.ok) {
         toast(`✅ 기본값 복원 완료 (총 ${res.count}개)`, 'success')
         await reload()
+        notifyOtherTabs('sources')
       } else {
-        toast('❌ 복원 실패', 'error')
+        toast('❌ 복원 실패' + (res.error ? ': ' + res.error : ''), 'error')
       }
     })
 
@@ -739,6 +835,7 @@
       document.getElementById('recipientEmail').value = ''
       document.getElementById('recipientLabel').value = ''
       await reloadRecipients()
+      notifyOtherTabs('recipients')
       toast(`📧 <strong>${escapeHtml(email)}</strong> 추가됨`, 'success')
     })
   }
@@ -970,12 +1067,89 @@
   }
 
   // ═════════════════════════════════════════════════════════════
+  // 🔄 실시간 동기화 (v2.2) — PC ↔ 모바일 연동
+  // 1) 같은 브라우저 탭 간: BroadcastChannel (즉시)
+  // 2) 서로 다른 디바이스 간: /api/admin/sync-version 폴링 (15초)
+  //    - 서버에 단순한 버전 카운터 (소스/수신자 변경시 +1)
+  //    - 버전이 바뀌면 자동 reload (UI 에 "다른 기기에서 변경됨" 토스트)
+  // ═════════════════════════════════════════════════════════════
+  const syncChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('morning-stock-sync') : null
+  let lastSyncVersion = null
+  let syncPollTimer = null
+  // isEditingModal 은 위 전역 상태 섹션에 선언됨
+
+  function notifyOtherTabs(what) {
+    try {
+      if (syncChannel) {
+        syncChannel.postMessage({ type: 'changed', what, ts: Date.now() })
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  if (syncChannel) {
+    syncChannel.addEventListener('message', (e) => {
+      const { type, what } = e.data || {}
+      if (type !== 'changed') return
+      console.log('[sync] 다른 탭에서 변경 감지:', what)
+      if (what === 'sources') reload()
+      else if (what === 'recipients') reloadRecipients()
+      else { reload(); reloadRecipients() }
+      try { toast('🔄 다른 화면에서 변경된 내용을 반영했습니다', 'info') } catch {}
+    })
+  }
+
+  async function pollSyncVersion() {
+    try {
+      const r = await fetch('/api/admin/sync-version', { cache: 'no-store' })
+      if (!r.ok) return
+      const data = await r.json()
+      const v = data.version
+      if (lastSyncVersion === null) {
+        lastSyncVersion = v
+        return
+      }
+      if (v !== lastSyncVersion) {
+        console.log('[sync] 서버 버전 변경:', lastSyncVersion, '→', v)
+        lastSyncVersion = v
+        // 편집 중이면 다음 주기까지 대기
+        if (isEditingModal || !modal.classList.contains('hidden')) {
+          console.log('[sync] 편집 중 — 재로딩 지연')
+          return
+        }
+        await reload()
+        await reloadRecipients()
+        try { toast('🔄 다른 기기에서 설정이 변경되어 자동 갱신되었습니다', 'info') } catch {}
+      }
+    } catch (e) {
+      // 네트워크 오류는 조용히 무시
+    }
+  }
+
+  function startSyncPolling() {
+    // 초기 version 가져오기
+    pollSyncVersion()
+    // 15초 간격 폴링 (브라우저 탭 focus 시 더 자주)
+    if (syncPollTimer) clearInterval(syncPollTimer)
+    syncPollTimer = setInterval(pollSyncVersion, 15000)
+
+    // 탭 visible 상태로 돌아오면 즉시 확인
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        pollSyncVersion()
+      }
+    })
+  }
+
+  // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
+  console.log('[MorningStock] Admin v2.2 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
   loadPresets().then(() => reload())
   reloadRecipients()
   checkTriggerConfig()
+  startSyncPolling()
+  console.log('[MorningStock] 초기화 완료. PC↔모바일 실시간 동기화 활성화.')
 })()

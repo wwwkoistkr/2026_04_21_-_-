@@ -67,6 +67,7 @@ const KV_KEY_SOURCES = 'sources:v2'            // v2 스키마 (검색어 포함
 const KV_KEY_SOURCES_LEGACY = 'sources:v1'     // 기존 v1 (마이그레이션 참조용)
 const KV_KEY_RECIPIENTS = 'recipients:v1'
 const KV_KEY_LAST_TRIGGER = 'trigger:last'     // "지금 발송" rate-limit 용
+const KV_KEY_SYNC_VERSION = 'sync:version'     // PC ↔ 모바일 실시간 동기화용 카운터
 const SESSION_COOKIE = 'msaic_session'
 const SESSION_TTL_SEC = 60 * 60 * 12           // 12시간
 const DEFAULT_RECIPIENT = 'wwwkoistkr@gmail.com'
@@ -241,6 +242,21 @@ async function loadSources(env: Bindings): Promise<NewsSource[]> {
 
 async function saveSources(env: Bindings, list: NewsSource[]): Promise<void> {
   await env.SOURCES_KV.put(KV_KEY_SOURCES, JSON.stringify(list))
+  await bumpSyncVersion(env)
+}
+
+/** PC↔모바일 동기화용 버전 카운터 증가 */
+async function bumpSyncVersion(env: Bindings): Promise<number> {
+  const raw = await env.SOURCES_KV.get(KV_KEY_SYNC_VERSION)
+  const cur = raw ? parseInt(raw, 10) || 0 : 0
+  const next = cur + 1
+  await env.SOURCES_KV.put(KV_KEY_SYNC_VERSION, String(next))
+  return next
+}
+
+async function getSyncVersion(env: Bindings): Promise<number> {
+  const raw = await env.SOURCES_KV.get(KV_KEY_SYNC_VERSION)
+  return raw ? parseInt(raw, 10) || 0 : 0
 }
 
 async function loadRecipients(env: Bindings): Promise<EmailRecipient[]> {
@@ -263,6 +279,7 @@ async function loadRecipients(env: Bindings): Promise<EmailRecipient[]> {
 
 async function saveRecipients(env: Bindings, list: EmailRecipient[]): Promise<void> {
   await env.SOURCES_KV.put(KV_KEY_RECIPIENTS, JSON.stringify(list))
+  await bumpSyncVersion(env)
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -363,8 +380,14 @@ app.get('/', (c) => {
       <header class="bg-gradient-to-r from-blue-600 to-sky-500 text-white rounded-2xl shadow-lg p-4 sm:p-6 mb-4 sm:mb-6">
         <div class="flex items-start justify-between gap-3">
           <div class="flex-1 min-w-0">
-            <div class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-              Daily Briefing Admin v2.1
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
+                Daily Briefing Admin v2.2
+              </span>
+              <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
+                <span>실시간 동기화</span>
+              </span>
             </div>
             <h1 class="text-xl sm:text-3xl font-bold mt-1 leading-tight">
               🌅 Morning Stock AI
@@ -529,7 +552,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.1</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2</span></p>
         <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -604,6 +627,13 @@ app.get('/api/admin/sources', async (c) => {
 /** 프리셋 카탈로그 조회 (UI 드롭다운용) */
 app.get('/api/admin/presets', (c) => {
   return c.json({ presets: QUERY_PRESETS })
+})
+
+/** 🔄 동기화 버전 조회 (PC ↔ 모바일 실시간 연동용)
+ *  소스/수신자 변경시마다 +1 되므로 클라이언트는 이 값만 폴링하면 된다. */
+app.get('/api/admin/sync-version', async (c) => {
+  const version = await getSyncVersion(c.env)
+  return c.json({ version, ts: Date.now() })
 })
 
 // ─────────────────────────────────────────────────────────────
@@ -1020,7 +1050,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.1' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2' })
 )
 
 export default app
