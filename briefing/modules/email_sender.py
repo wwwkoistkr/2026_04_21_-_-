@@ -53,8 +53,23 @@ def fetch_recipients_from_admin(
         resp.raise_for_status()
         data = resp.json()
         emails = data.get("recipients", [])
-        logger.info("관리 콘솔 수신자 %d명 수신: %s", len(emails), emails)
+        logger.info("관리 콘솔 수신자 %d명 수신", len(emails))
         return [e for e in emails if isinstance(e, str) and "@" in e]
+    except requests.HTTPError as exc:
+        # (v2.2.4) 401/403 때 원인을 명확히 알려 - 과거엔 조용히 폴백하느라 관리UI에
+        # 추가한 이메일이 무시되는 현상을 놓쳤음
+        status = exc.response.status_code if exc.response is not None else None
+        if status in (401, 403):
+            logger.warning(
+                "관리 콘솔 수신자 조회 401/403 — BRIEFING_READ_TOKEN 이 올바르지 않거나 "
+                "BRIEFING_PUBLIC_TOKEN (백엔드 검증값) 과 일치하지 않습니다. "
+                "→ 관리 UI에 추가한 수신자들이 이번 발송에서 '반영되지 않았습니다'. "
+                "EMAIL_RECIPIENTS 환경변수만 사용됩니다."
+            )
+            print("⚠️  [관리콘솔 수신자] BRIEFING_READ_TOKEN 인증 실패 → 환경변수 수신자만 사용됨")
+        else:
+            logger.warning("관리 콘솔 수신자 조회 HTTP %s: %s", status, exc)
+        return []
     except Exception as exc:  # noqa: BLE001
         logger.warning("관리 콘솔 수신자 조회 실패 (환경변수만 사용): %s", exc)
         return []
@@ -244,12 +259,20 @@ def send_email(
     """
     Gmail SMTP(SSL) 를 통해 HTML 이메일을 발송합니다.
 
+    v2.2.4 변경점
+    -------------
+    - ``sendmail()`` 반환값(거부된 수신자 dict)을 검사하여 **일부 실패도 에러로 보고**
+    - 수신자별 결과를 명시적으로 로깅
+    - Gmail 이 스팸 분류를 줄이도록 **Reply-To**, **Date**, **Message-ID**, **List-Unsubscribe**
+      헤더를 추가
+    - 발송 전/후 카운트 및 주소 마스킹(개인정보 보호) 로그
+
     Raises
     ------
     RuntimeError
-        필수 환경변수 누락 시.
+        필수 환경변수 누락 / 모든 수신자 거부 / 일부 수신자 거부 시.
     smtplib.SMTPException
-        SMTP 관련 오류 발생 시.
+        SMTP 연결/인증 오류 발생 시.
     """
     sender = sender or os.getenv("EMAIL_SENDER")
     app_password = app_password or os.getenv("EMAIL_APP_PASSWORD")
@@ -265,7 +288,11 @@ def send_email(
         raise RuntimeError(
             "수신자가 없습니다. EMAIL_RECIPIENTS 환경변수 또는 관리 콘솔에 최소 1명 등록해야 합니다."
         )
-    logger.info("최종 발송 대상: %s", recipients)
+
+    # (v2.2.4) 전체 수신자를 가시적으로 로깅 (개인정보 보호를 위해 부분 마스킹)
+    masked = [_mask_email(r) for r in recipients]
+    logger.info("최종 발송 대상: %d명 → %s", len(recipients), masked)
+    print(f"📬 최종 발송 대상: {len(recipients)}명 → {', '.join(masked)}")
 
     html_body = build_html_email(markdown_body, subject)
 
@@ -273,18 +300,79 @@ def send_email(
     msg["Subject"] = subject
     msg["From"] = sender
     msg["To"] = ", ".join(recipients)
+    # (v2.2.4) 스팸 분류를 낮추기 위한 표준 헤더
+    msg["Reply-To"] = sender
+    msg["Date"] = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
+    # Gmail 은 List-Unsubscribe 헤더가 있는 자동 발송 메일을 '마케팅/알림' 으로 분류하되
+    # 신뢰성 점수를 올리는 긍정적 효과가 있음
+    msg["List-Unsubscribe"] = f"<mailto:{sender}?subject=unsubscribe>"
+    msg["X-Mailer"] = "MorningStockAI-BriefingCenter/2.2.4"
 
     # 텍스트 대체본 & HTML 본문
     msg.attach(MIMEText(markdown_body, "plain", "utf-8"))
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
     logger.info("SMTP 연결: %s:%d", smtp_host, smtp_port)
-    with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as server:
-        server.login(sender, app_password)
-        server.sendmail(sender, recipients, msg.as_string())
+    print(f"📡 SMTP 연결: {smtp_host}:{smtp_port}")
+    try:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as server:
+            server.login(sender, app_password)
+            # sendmail() 반환값: {거부된_수신자: (코드, 사유_bytes), ...}
+            rejected = server.sendmail(sender, recipients, msg.as_string())
+    except smtplib.SMTPAuthenticationError as exc:
+        # Gmail 앱 비밀번호 문제의 전형적 원인
+        hint = (
+            " Gmail 앱 비밀번호(16자리)가 올바른지 확인하세요. "
+            "일반 비밀번호는 사용할 수 없으며, 2단계 인증이 활성화되어 있어야 합니다."
+        )
+        logger.error("SMTP 인증 실패: %s%s", exc, hint)
+        raise RuntimeError(f"SMTP 인증 실패: {exc}.{hint}") from exc
+    except smtplib.SMTPRecipientsRefused as exc:
+        logger.error("모든 수신자가 SMTP 서버에 의해 거부됨: %s", exc.recipients)
+        raise RuntimeError(
+            f"모든 수신자가 SMTP 서버에 의해 거부되었습니다: {exc.recipients}. "
+            "EMAIL_RECIPIENTS 환경변수의 주소 형식/철자를 확인하세요."
+        ) from exc
 
-    logger.info("메일 발송 완료 → %s", recipients)
-    print(f"✉️  메일 발송 완료 → {', '.join(recipients)}")
+    # (v2.2.4) 일부 수신자 거부 검사 - 과거엔 이 케이스를 놓쳐 '성공'으로 잘못 보고했음
+    accepted = [r for r in recipients if r not in (rejected or {})]
+    print(f"✅ 수락된 수신자: {len(accepted)}명 → {', '.join(_mask_email(r) for r in accepted)}")
+    if rejected:
+        rejected_info = {
+            r: (
+                (v[0] if isinstance(v, tuple) else str(v)),
+                (v[1].decode('utf-8', 'replace') if isinstance(v, tuple) and isinstance(v[1], (bytes, bytearray)) else str(v)),
+            )
+            for r, v in rejected.items()
+        }
+        logger.warning("일부 수신자 거부됨 (%d명): %s", len(rejected), rejected_info)
+        print(f"⚠️  거부된 수신자: {len(rejected)}명 → {list(rejected_info.keys())}")
+        for r, (code, reason) in rejected_info.items():
+            print(f"   • {_mask_email(r)} → SMTP {code}: {reason}")
+        # 수락된 사람이 한 명도 없으면 완전 실패로 간주하고 예외
+        if not accepted:
+            raise RuntimeError(
+                "모든 수신자가 SMTP 서버에 의해 거부되었습니다. 위 로그에서 SMTP 코드/사유를 확인하세요."
+            )
+
+    logger.info("메일 발송 완료: %d/%d 수락", len(accepted), len(recipients))
+    print(f"✉️  메일 발송 완료: {len(accepted)}/{len(recipients)}명 수락됨 → {', '.join(_mask_email(r) for r in accepted)}")
+    print("   💡 메일이 안 보이면 스팸/프로모션 폴더를 확인해 주세요.")
+
+
+def _mask_email(email: str) -> str:
+    """개인정보 보호용 이메일 부분 마스킹: abcdef@gmail.com → ab***f@gmail.com"""
+    try:
+        local, _, domain = email.partition("@")
+        if not domain:
+            return email
+        if len(local) <= 3:
+            masked = local[:1] + "***"
+        else:
+            masked = local[:2] + "***" + local[-1]
+        return f"{masked}@{domain}"
+    except Exception:  # noqa: BLE001
+        return email
 
 
 # ---------------------------------------------------------------------------

@@ -69,7 +69,10 @@ const KV_KEY_RECIPIENTS = 'recipients:v1'
 const KV_KEY_LAST_TRIGGER = 'trigger:last'     // "지금 발송" rate-limit 용
 const KV_KEY_SYNC_VERSION = 'sync:version'     // PC ↔ 모바일 실시간 동기화용 카운터
 const SESSION_COOKIE = 'msaic_session'
-const SESSION_TTL_SEC = 60 * 60 * 12           // 12시간
+// (v2.2.4) 12시간 → 2시간으로 단축. 사용자 요구 "첫 화면에 비밀번호"
+// 를 만족시키기 위함. 자주 사용하는 사용자는 모바일 PWA에 저장된 비밀번호로
+// 바로 로그인되므로 UX 저하는 미미함.
+const SESSION_TTL_SEC = 60 * 60 * 2            // 2시간
 const DEFAULT_RECIPIENT = 'wwwkoistkr@gmail.com'
 
 // 지금 발송 기본 설정 (Secret 없으면 기본값 사용)
@@ -292,8 +295,9 @@ app.use(renderer)
 // ═════════════════════════════════════════════════════════════
 app.get('/login', (c) => {
   const error = c.req.query('error')
+  const loggedOut = c.req.query('logout')
   return c.render(
-    <div class="max-w-md mx-auto mt-20 p-8 bg-white rounded-2xl shadow-lg">
+    <div class="max-w-md mx-auto mt-12 sm:mt-20 p-6 sm:p-8 bg-white rounded-2xl shadow-lg">
       <div class="text-center mb-6">
         <div class="text-5xl mb-2">🌅</div>
         <h1 class="text-2xl font-bold text-gray-800">Morning Stock AI</h1>
@@ -302,6 +306,11 @@ app.get('/login', (c) => {
       {error && (
         <div class="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
           ⚠️ 비밀번호가 올바르지 않습니다.
+        </div>
+      )}
+      {loggedOut && !error && (
+        <div class="mb-4 p-3 bg-green-50 border border-green-200 rounded text-green-700 text-sm">
+          ✅ 안전하게 로그아웃되었습니다.
         </div>
       )}
       <form method="post" action="/login" class="space-y-4">
@@ -321,14 +330,15 @@ app.get('/login', (c) => {
         </div>
         <button
           type="submit"
-          class="w-full py-2.5 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-semibold rounded-lg hover:opacity-95 transition"
+          class="touch-target w-full py-3 bg-gradient-to-r from-blue-600 to-sky-500 text-white font-semibold rounded-lg hover:opacity-95 transition"
         >
-          로그인
+          <i class="fa-solid fa-right-to-bracket mr-1"></i> 로그인
         </button>
       </form>
-      <p class="text-xs text-gray-400 text-center mt-6">
-        비밀번호는 <code>ADMIN_PASSWORD</code> 환경변수/Secret 으로 설정합니다.
-      </p>
+      <div class="mt-6 text-xs text-gray-400 text-center space-y-1">
+        <p>비밀번호는 <code>ADMIN_PASSWORD</code> Secret 으로 설정됩니다.</p>
+        <p>세션 유지 시간: 2시간 (이후 재로그인 필요)</p>
+      </div>
     </div>,
     { title: 'Login — Morning Stock AI Briefing Center' }
   )
@@ -355,7 +365,13 @@ app.post('/login', async (c) => {
 
 app.post('/logout', (c) => {
   setCookie(c, SESSION_COOKIE, '', { path: '/', maxAge: 0 })
-  return c.redirect('/login')
+  return c.redirect('/login?logout=1')
+})
+
+// (v2.2.4) GET 요청으로도 로그아웃 가능 — 모바일 PWA 북마크/빠른 실행용
+app.get('/logout', (c) => {
+  setCookie(c, SESSION_COOKIE, '', { path: '/', maxAge: 0 })
+  return c.redirect('/login?logout=1')
 })
 
 // ═════════════════════════════════════════════════════════════
@@ -382,7 +398,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.2.3
+                Daily Briefing Admin v2.2.4
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -552,7 +568,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2.3</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2.4</span></p>
         <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -608,7 +624,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="toast-hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js?v=2.2.3"></script>
+      <script src="/static/admin.js?v=2.2.4"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )
@@ -1050,7 +1066,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2.3' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2.4' })
 )
 
 export default app

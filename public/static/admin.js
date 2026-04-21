@@ -1,5 +1,5 @@
 /**
- * Morning Stock AI — Admin Dashboard Client Script v2.2.3
+ * Morning Stock AI — Admin Dashboard Client Script v2.2.4
  * ───────────────────────────────────────────────────────
  * - 카테고리 탭 (🇰🇷/🌎/📺/➕/전체)
  * - 소스 카드: 검색어 태그 표시, 편집/테스트/삭제 버튼
@@ -9,8 +9,15 @@
  * - 토스트 알림
  * - PC↔모바일 실시간 동기화 (BroadcastChannel + 폴링)
  * - 글로벌 에러 핸들러로 사용자에게 친절한 에러 표시
- * BUILD: 2026-04-21 v2.2.3
- * [v2.2.3] 🔴 CRITICAL FIX: "지금 발송" 중복 트리거 및 폴링 오매칭 수정
+ * BUILD: 2026-04-21 v2.2.4
+ * [v2.2.4] 🔴 CRITICAL FIX: 이메일 '발송완료' 오보고 + 로그인화면 복원
+ *   - Python email_sender: sendmail() 거부 수신자 dict 검사 → 일부 실패도 감지
+ *   - Gmail 스팸 분류 낮추는 헤더 추가 (Reply-To, List-Unsubscribe, Date)
+ *   - BRIEFING_READ_TOKEN 401/403 시 명확한 진단 로그 → 관리UI 수신자 반영 안되는 상황 가시화
+ *   - 세션 TTL 12h → 2h: 첫화면 로그인 요구 충족
+ *   - GET /logout 추가 (모바일 편의)
+ *   - 스팸폴더 확인 안내 UI 추가
+ * [v2.2.3] CRITICAL FIX: "지금 발송" 중복 트리거 및 폴링 오매칭 수정
  *   - 더블클릭/연타 방지용 triggerInFlight 플래그 + 버튼 잠금
  *   - startPolling 이 workflow_dispatch 이벤트 & 60초 오차 창 내의
  *     가장 최근 런 만 매칭하도록 강화 (다른 실행과 혼동되던 버그 해결)
@@ -1058,14 +1065,23 @@
       if (match.status === 'completed') {
         clearInterval(triggerPollTimer)
         if (match.conclusion === 'success') {
+          // (v2.2.4) 실제 발송 완료 시 스팸 폴더 확인 안내 - 과거 사용자가
+          // '워크플로 성공'만 보고 받은메일함에서 못 찾아 "발송 안됨"으로 오해한 버그 대응
+          const spamHint = dryRun ? '' :
+            '<div class="text-xs mt-2 p-2 bg-white/60 rounded border border-green-300 text-green-900">' +
+              '📬 <strong>메일이 안 보이나요?</strong><br>' +
+              '&nbsp;&nbsp;1️⃣ Gmail <strong>스팸/프로모션 탭</strong>을 확인해 주세요<br>' +
+              '&nbsp;&nbsp;2️⃣ <code>EMAIL_RECIPIENTS</code> Secret 의 주소 철자 확인<br>' +
+              '&nbsp;&nbsp;3️⃣ 그래도 없으면 아래 <strong>상세 보기</strong> 에서 "📬 최종 발송 대상" 로그 확인' +
+            '</div>'
           showTriggerStatus(
             'bg-green-50 border border-green-200 text-green-800',
             `<i class="fa-solid fa-circle-check mr-1"></i><strong>실행 완료!</strong> ${
               dryRun ? 'DRY RUN 성공 (메일 미발송)' : '이메일 발송 완료'
             }
-            <a href="${match.html_url}" target="_blank" class="underline ml-2">상세 보기</a>`
+            <a href="${match.html_url}" target="_blank" class="underline ml-2">상세 보기</a>${spamHint}`
           )
-          toast(dryRun ? '✅ DRY RUN 성공' : '✉️ 발송 완료!', 'success')
+          toast(dryRun ? '✅ DRY RUN 성공' : '✉️ 발송 완료! (스팸폴더 확인)', 'success')
         } else {
           showTriggerStatus(
             'bg-red-50 border border-red-200 text-red-700',
@@ -1264,7 +1280,7 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.2.3 초기화 중…')
+  console.log('[MorningStock] Admin v2.2.4 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
