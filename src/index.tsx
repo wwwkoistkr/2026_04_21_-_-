@@ -19,8 +19,11 @@ import { renderer } from './renderer'
 // ── 타입 정의 ──────────────────────────────────────────────────────────
 type Bindings = {
   SOURCES_KV: KVNamespace
-  ADMIN_PASSWORD?: string           // 관리자 로그인 비밀번호
-  BRIEFING_READ_TOKEN?: string      // Python 수집기 API 인증 토큰
+  ADMIN_PASSWORD?: string              // 관리자 로그인 비밀번호
+  BRIEFING_READ_TOKEN?: string         // Python 수집기 API 인증 토큰
+  GITHUB_TRIGGER_TOKEN?: string        // GitHub PAT (repo + workflow 권한) — 지금 발송용
+  GITHUB_REPO?: string                 // 예: "wwwkoistkr/2026_04_21_-_-" (기본값 하드코딩)
+  GITHUB_WORKFLOW_FILE?: string        // 예: "daily_briefing.yml"
 }
 
 type SourceType = 'rss' | 'google_news' | 'youtube' | 'web'
@@ -63,9 +66,15 @@ const app = new Hono<{ Bindings: Bindings }>()
 const KV_KEY_SOURCES = 'sources:v2'            // v2 스키마 (검색어 포함)
 const KV_KEY_SOURCES_LEGACY = 'sources:v1'     // 기존 v1 (마이그레이션 참조용)
 const KV_KEY_RECIPIENTS = 'recipients:v1'
+const KV_KEY_LAST_TRIGGER = 'trigger:last'     // "지금 발송" rate-limit 용
 const SESSION_COOKIE = 'msaic_session'
 const SESSION_TTL_SEC = 60 * 60 * 12           // 12시간
 const DEFAULT_RECIPIENT = 'wwwkoistkr@gmail.com'
+
+// 지금 발송 기본 설정 (Secret 없으면 기본값 사용)
+const DEFAULT_GITHUB_REPO = 'wwwkoistkr/2026_04_21_-_-'
+const DEFAULT_WORKFLOW_FILE = 'daily_briefing.yml'
+const TRIGGER_COOLDOWN_SEC = 600               // 10분 쿨다운
 
 // ─────────────────────────────────────────────────────────────
 // 🌱 기본 시드 소스 정의 + 추천 프리셋 (옵션 3)
@@ -349,56 +358,88 @@ app.use('/api/admin/*', async (c, next) => {
 // ═════════════════════════════════════════════════════════════
 app.get('/', (c) => {
   return c.render(
-    <div class="max-w-6xl mx-auto p-6">
+    <div class="max-w-6xl mx-auto p-3 sm:p-6">
       {/* 헤더 */}
-      <header class="bg-gradient-to-r from-blue-600 to-sky-500 text-white rounded-2xl shadow-lg p-6 mb-6">
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="text-xs uppercase tracking-widest opacity-80">
-              Daily Briefing Admin v2
+      <header class="bg-gradient-to-r from-blue-600 to-sky-500 text-white rounded-2xl shadow-lg p-4 sm:p-6 mb-4 sm:mb-6">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
+              Daily Briefing Admin v2.1
             </div>
-            <h1 class="text-3xl font-bold mt-1">
-              🌅 Morning Stock AI Briefing Center
+            <h1 class="text-xl sm:text-3xl font-bold mt-1 leading-tight">
+              🌅 Morning Stock AI
             </h1>
-            <p class="text-sm opacity-90 mt-1">
-              매일 아침 <strong>07:00 (KST)</strong> 자동 발송되는 브리핑의
-              <strong> 수신자·뉴스 소스·검색어</strong>를 여기서 모두 관리합니다.
+            <p class="text-xs sm:text-sm opacity-90 mt-1">
+              매일 <strong>07:00 KST</strong> 자동 발송 · 모바일 설치 가능 (홈 화면 추가)
             </p>
           </div>
-          <form method="post" action="/logout">
-            <button class="px-3 py-1.5 text-sm bg-white/20 rounded hover:bg-white/30">
-              로그아웃
+          <form method="post" action="/logout" class="flex-shrink-0">
+            <button class="touch-target px-3 py-1.5 text-xs sm:text-sm bg-white/20 rounded hover:bg-white/30">
+              <i class="fa-solid fa-right-from-bracket sm:hidden"></i>
+              <span class="hidden sm:inline">로그아웃</span>
             </button>
           </form>
         </div>
       </header>
 
+      {/* 🚀 지금 발송 섹션 (새 기능) */}
+      <section class="bg-gradient-to-br from-orange-50 to-amber-50 border-2 border-orange-200 rounded-2xl shadow p-4 sm:p-6 mb-6">
+        <div class="flex items-start gap-3 sm:gap-4">
+          <div class="flex-shrink-0 text-3xl sm:text-4xl pt-1">🚀</div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-base sm:text-lg font-bold text-gray-800">
+              지금 즉시 브리핑 발송
+            </h2>
+            <p class="text-xs sm:text-sm text-gray-600 mt-1">
+              매일 07:00 KST 스케줄과 별도로, <strong>지금 바로</strong> 최신 뉴스를 수집·요약·이메일 발송합니다.
+              (약 1~3분 소요)
+            </p>
+            <div id="triggerStatus" class="hidden mt-3 p-3 rounded-lg text-xs sm:text-sm"></div>
+          </div>
+        </div>
+        <div class="flex flex-col sm:flex-row gap-2 mt-4 sm:mt-3 sm:ml-16">
+          <button id="btnTriggerNow"
+            class="touch-target flex-1 sm:flex-initial px-4 py-3 sm:py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-amber-600 transition shadow-sm">
+            <i class="fa-solid fa-paper-plane mr-1"></i>🚀 지금 발송
+          </button>
+          <button id="btnTriggerDryRun"
+            class="touch-target flex-1 sm:flex-initial px-4 py-3 sm:py-2.5 bg-white border border-orange-300 text-orange-700 font-medium rounded-lg hover:bg-orange-50 transition">
+            <i class="fa-solid fa-flask mr-1"></i>DRY RUN (미리보기)
+          </button>
+          <button id="btnCheckTriggerStatus"
+            class="touch-target px-4 py-3 sm:py-2.5 bg-white border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition" title="최근 워크플로 실행 상태 확인">
+            <i class="fa-solid fa-rotate"></i>
+          </button>
+        </div>
+      </section>
+
       {/* ① 이메일 수신자 관리 */}
-      <section class="bg-white rounded-2xl shadow p-6 mb-6">
-        <h2 class="text-lg font-bold text-gray-800 mb-4">
+      <section class="bg-white rounded-2xl shadow p-4 sm:p-6 mb-6">
+        <h2 class="text-base sm:text-lg font-bold text-gray-800 mb-4">
           <i class="fa-solid fa-envelope text-emerald-500 mr-2"></i>
           ① 매일 아침 브리핑을 받을 이메일 주소
         </h2>
-        <p class="text-sm text-gray-500 mb-4">
+        <p class="text-xs sm:text-sm text-gray-500 mb-4">
           여기 등록된 모든 이메일로 <strong>매일 07:00 KST</strong> 브리핑이 발송됩니다.
         </p>
-        <form id="addRecipientForm" class="grid grid-cols-1 md:grid-cols-[2fr_1fr_auto] gap-3">
+        <form id="addRecipientForm" class="grid grid-cols-1 md:grid-cols-[2fr_1fr_auto] gap-2 sm:gap-3">
           <input
             id="recipientEmail"
             type="email"
             required
             autocomplete="email"
-            placeholder="이메일 주소 (예: wwwkoistkr@gmail.com)"
-            class="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            inputmode="email"
+            placeholder="이메일 주소"
+            class="touch-target px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
           <input
             id="recipientLabel"
-            placeholder="별명 (선택, 예: 본인/업무용)"
-            class="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            placeholder="별명 (선택)"
+            class="touch-target px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
           <button
             type="submit"
-            class="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
+            class="touch-target px-4 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700"
           >
             <i class="fa-solid fa-plus mr-1"></i> 수신자 추가
           </button>
@@ -416,12 +457,12 @@ app.get('/', (c) => {
       </section>
 
       {/* ② 뉴스 소스 관리 (새 UI) */}
-      <section class="bg-white rounded-2xl shadow p-6 mb-6">
-        <h2 class="text-lg font-bold text-gray-800 mb-2">
+      <section class="bg-white rounded-2xl shadow p-4 sm:p-6 mb-6">
+        <h2 class="text-base sm:text-lg font-bold text-gray-800 mb-2">
           <i class="fa-solid fa-newspaper text-blue-500 mr-2"></i>
           ② 뉴스 소스 & 검색어 관리
         </h2>
-        <p class="text-sm text-gray-500 mb-4">
+        <p class="text-xs sm:text-sm text-gray-500 mb-4">
           각 언론사에 <strong>검색어</strong>(최대 5개)를 설정해 관심 주제의 기사만 수집합니다.
           검색어를 비우면 해당 사이트 최신 뉴스가 그대로 수집됩니다.
         </p>
@@ -465,60 +506,84 @@ app.get('/', (c) => {
       </section>
 
       {/* 추천 검색어 프리셋 안내 */}
-      <section class="bg-blue-50 border border-blue-200 rounded-2xl p-5 mb-6 text-sm">
-        <h3 class="font-bold text-blue-900 mb-2">
+      <section class="bg-blue-50 border border-blue-200 rounded-2xl p-4 sm:p-5 mb-6 text-sm">
+        <h3 class="font-bold text-blue-900 mb-2 text-sm sm:text-base">
           <i class="fa-solid fa-lightbulb mr-1"></i>
           추천 검색어 프리셋
         </h3>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-gray-700">
           <div>
-            <strong>🇰🇷 한국:</strong>
-            <p class="text-xs mt-1">반도체, AI, 금리, HBM, 삼성전자, SK하이닉스, 코스피</p>
+            <strong class="text-xs sm:text-sm">🇰🇷 한국 증권:</strong>
+            <p class="text-xs mt-1">반도체, HBM, 코스피, 삼성전자, SK하이닉스</p>
           </div>
           <div>
-            <strong>🌎 미국(반도체):</strong>
-            <p class="text-xs mt-1">semiconductor, AI chip, TSMC, Nvidia, AMD, Micron</p>
+            <strong class="text-xs sm:text-sm">🇰🇷 한국 IT:</strong>
+            <p class="text-xs mt-1">AI, 엔비디아, TSMC, 파운드리, 데이터센터</p>
           </div>
           <div>
-            <strong>🌎 미국(ETF/거시):</strong>
-            <p class="text-xs mt-1">ETF, S&amp;P 500, dividend, Fed rate, FOMC, QQQ</p>
+            <strong class="text-xs sm:text-sm">🌎 US Semi / ETF:</strong>
+            <p class="text-xs mt-1">semiconductor, AI chip, HBM, SMH, SOXX</p>
           </div>
         </div>
       </section>
 
       {/* 푸터 */}
-      <footer class="text-center text-xs text-gray-400 mt-8">
-        Morning Stock AI Briefing Center v2 · Python pipeline runs daily at 07:00 KST via GitHub Actions
+      <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.1</span></p>
+        <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
+        <p class="mt-2">
+          <button id="btnInstallPwa" class="hidden text-blue-600 underline">
+            <i class="fa-solid fa-download"></i> 홈 화면에 설치하기
+          </button>
+        </p>
       </footer>
 
-      {/* 모달: 소스 편집 */}
-      <div id="editModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-          <div class="p-6 border-b border-gray-200 flex items-center justify-between">
-            <h3 class="text-lg font-bold text-gray-800">
+      {/* 모달: 소스 편집 — 모바일 전체 화면 */}
+      <div id="editModal" class="hidden fixed inset-0 bg-black/50 z-50 sm:flex sm:items-center sm:justify-center sm:p-4">
+        <div class="bg-white sm:rounded-2xl shadow-2xl w-full h-full sm:h-auto sm:max-w-2xl sm:max-h-[90vh] overflow-y-auto flex flex-col">
+          <div class="p-4 sm:p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white z-10">
+            <h3 class="text-base sm:text-lg font-bold text-gray-800 truncate pr-2">
               <i class="fa-solid fa-pen-to-square text-blue-500 mr-2"></i>
               <span id="modalTitle">소스 편집</span>
             </h3>
-            <button id="btnCloseModal" class="text-gray-400 hover:text-gray-600">
-              <i class="fa-solid fa-xmark text-xl"></i>
+            <button id="btnCloseModal" class="touch-target text-gray-400 hover:text-gray-600 flex-shrink-0">
+              <i class="fa-solid fa-xmark text-2xl"></i>
             </button>
           </div>
-          <div class="p-6" id="modalBody">
+          <div class="p-4 sm:p-6 flex-1" id="modalBody">
             {/* JS 가 채워넣음 */}
           </div>
-          <div class="p-4 border-t border-gray-200 flex justify-end gap-2 bg-gray-50 rounded-b-2xl">
-            <button id="btnCancelEdit" class="px-4 py-2 text-sm bg-white border border-gray-300 rounded hover:bg-gray-50">
+          <div class="p-4 border-t border-gray-200 flex justify-end gap-2 bg-gray-50 sm:rounded-b-2xl sticky bottom-0 z-10">
+            <button id="btnCancelEdit" class="touch-target px-4 py-2.5 text-sm bg-white border border-gray-300 rounded hover:bg-gray-50">
               취소
             </button>
-            <button id="btnSaveEdit" class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
+            <button id="btnSaveEdit" class="touch-target px-5 py-2.5 text-sm bg-blue-600 text-white font-semibold rounded hover:bg-blue-700">
               <i class="fa-solid fa-check mr-1"></i>저장
             </button>
           </div>
         </div>
       </div>
 
-      {/* 토스트 알림 */}
-      <div id="toast" class="hidden fixed bottom-6 right-6 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm"></div>
+      {/* 확인 모달 (지금 발송 용) */}
+      <div id="confirmModal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full">
+          <div class="p-5 sm:p-6">
+            <h3 id="confirmTitle" class="text-base sm:text-lg font-bold text-gray-800 mb-2">확인</h3>
+            <p id="confirmBody" class="text-sm text-gray-600 mb-4"></p>
+            <div class="flex gap-2 justify-end">
+              <button id="btnConfirmCancel" class="touch-target px-4 py-2 text-sm bg-white border border-gray-300 rounded hover:bg-gray-50">
+                취소
+              </button>
+              <button id="btnConfirmOk" class="touch-target px-5 py-2 text-sm bg-red-600 text-white font-semibold rounded hover:bg-red-700">
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 토스트 알림 — 모바일은 하단 중앙 */}
+      <div id="toast" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
       <script src="/static/admin.js"></script>
     </div>,
@@ -539,6 +604,171 @@ app.get('/api/admin/sources', async (c) => {
 /** 프리셋 카탈로그 조회 (UI 드롭다운용) */
 app.get('/api/admin/presets', (c) => {
   return c.json({ presets: QUERY_PRESETS })
+})
+
+// ─────────────────────────────────────────────────────────────
+// 🚀 "지금 발송" — GitHub Actions workflow_dispatch 래퍼
+// ─────────────────────────────────────────────────────────────
+
+interface TriggerRecord {
+  timestamp: number  // Unix ms
+  dryRun: boolean
+  ok: boolean
+}
+
+/** 쿨다운 체크 */
+async function getLastTrigger(env: Bindings): Promise<TriggerRecord | null> {
+  const raw = await env.SOURCES_KV.get(KV_KEY_LAST_TRIGGER, 'json')
+  return (raw as TriggerRecord) ?? null
+}
+
+async function saveTrigger(env: Bindings, record: TriggerRecord): Promise<void> {
+  await env.SOURCES_KV.put(KV_KEY_LAST_TRIGGER, JSON.stringify(record))
+}
+
+/** 현재 지금-발송 기능 설정 상태 조회 */
+app.get('/api/admin/trigger-status', async (c) => {
+  const hasToken = !!c.env.GITHUB_TRIGGER_TOKEN
+  const repo = c.env.GITHUB_REPO || DEFAULT_GITHUB_REPO
+  const workflow = c.env.GITHUB_WORKFLOW_FILE || DEFAULT_WORKFLOW_FILE
+  const last = await getLastTrigger(c.env)
+  const now = Date.now()
+  const cooldownRemain = last
+    ? Math.max(0, TRIGGER_COOLDOWN_SEC * 1000 - (now - last.timestamp))
+    : 0
+
+  return c.json({
+    configured: hasToken,
+    repo,
+    workflow,
+    cooldownSec: TRIGGER_COOLDOWN_SEC,
+    cooldownRemainMs: cooldownRemain,
+    last,
+  })
+})
+
+/** 실제 워크플로 트리거 */
+app.post('/api/admin/trigger-now', async (c) => {
+  const token = c.env.GITHUB_TRIGGER_TOKEN
+  if (!token) {
+    return c.json({
+      ok: false,
+      error: 'GITHUB_TRIGGER_TOKEN 이 설정되지 않았습니다. Cloudflare Secret 으로 PAT 를 등록하세요.',
+    }, 503)
+  }
+
+  const body = await c.req.json().catch(() => ({}))
+  const dryRun = !!body.dryRun
+
+  // 쿨다운 체크
+  const last = await getLastTrigger(c.env)
+  const now = Date.now()
+  if (last && now - last.timestamp < TRIGGER_COOLDOWN_SEC * 1000) {
+    const remain = Math.ceil((TRIGGER_COOLDOWN_SEC * 1000 - (now - last.timestamp)) / 1000)
+    return c.json({
+      ok: false,
+      error: `⏳ 연속 호출 방지: ${remain}초 뒤 다시 시도하세요.`,
+      cooldownRemainSec: remain,
+    }, 429)
+  }
+
+  const repo = c.env.GITHUB_REPO || DEFAULT_GITHUB_REPO
+  const workflow = c.env.GITHUB_WORKFLOW_FILE || DEFAULT_WORKFLOW_FILE
+  const dispatchUrl = `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/dispatches`
+
+  try {
+    const resp = await fetch(dispatchUrl, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'MorningStockAI-BriefingCenter/2.1',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ref: 'main',
+        inputs: {
+          dry_run: dryRun ? 'true' : 'false',
+        },
+      }),
+    })
+
+    if (resp.status === 204) {
+      await saveTrigger(c.env, { timestamp: now, dryRun, ok: true })
+      return c.json({
+        ok: true,
+        dryRun,
+        message: dryRun
+          ? '✅ DRY RUN 요청됨 — 메일 발송 없이 프리뷰만 생성'
+          : '✅ 브리핑 발송 요청됨 — 약 1~3분 뒤 이메일 도착',
+        runsUrl: `https://github.com/${repo}/actions/workflows/${workflow}`,
+      })
+    }
+
+    // 오류 분기
+    let detail = ''
+    try {
+      const errJson = await resp.json()
+      detail = errJson.message || JSON.stringify(errJson)
+    } catch {
+      detail = await resp.text()
+    }
+
+    await saveTrigger(c.env, { timestamp: now, dryRun, ok: false })
+    return c.json({
+      ok: false,
+      error: `GitHub API ${resp.status}: ${detail}`,
+      hint: resp.status === 401
+        ? 'PAT 토큰이 잘못되었거나 만료됨. repo + workflow 권한 확인.'
+        : resp.status === 404
+        ? `워크플로 파일(${workflow}) 또는 저장소(${repo}) 를 찾을 수 없음.`
+        : undefined,
+    }, 502)
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/** 최근 워크플로 실행 조회 (상태 폴링용) */
+app.get('/api/admin/recent-runs', async (c) => {
+  const token = c.env.GITHUB_TRIGGER_TOKEN
+  if (!token) {
+    return c.json({ ok: false, error: 'GITHUB_TRIGGER_TOKEN 미설정', runs: [] }, 503)
+  }
+  const repo = c.env.GITHUB_REPO || DEFAULT_GITHUB_REPO
+  const workflow = c.env.GITHUB_WORKFLOW_FILE || DEFAULT_WORKFLOW_FILE
+
+  try {
+    const resp = await fetch(
+      `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/runs?per_page=5`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${token}`,
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'MorningStockAI-BriefingCenter/2.1',
+        },
+      }
+    )
+    if (!resp.ok) {
+      return c.json({ ok: false, error: `HTTP ${resp.status}`, runs: [] }, 502)
+    }
+    const data: any = await resp.json()
+    const runs = (data.workflow_runs || []).map((r: any) => ({
+      id: r.id,
+      status: r.status,          // queued / in_progress / completed
+      conclusion: r.conclusion,  // success / failure / null
+      event: r.event,
+      created_at: r.created_at,
+      run_number: r.run_number,
+      html_url: r.html_url,
+      display_title: r.display_title,
+    }))
+    return c.json({ ok: true, runs })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e), runs: [] }, 500)
+  }
 })
 
 /** 새 소스 추가 (사용자 추가는 category=custom 으로 저장) */
@@ -790,7 +1020,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.0' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.1' })
 )
 
 export default app

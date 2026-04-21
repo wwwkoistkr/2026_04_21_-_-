@@ -63,6 +63,20 @@
   }
 
   // ═════════════════════════════════════════════════════════════
+  // 🚀 "지금 발송" API
+  // ═════════════════════════════════════════════════════════════
+  const triggerApi = {
+    status: () => fetch('/api/admin/trigger-status').then((r) => r.json()),
+    run: (dryRun) =>
+      fetch('/api/admin/trigger-now', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun }),
+      }).then((r) => r.json()),
+    recentRuns: () => fetch('/api/admin/recent-runs').then((r) => r.json()),
+  }
+
+  // ═════════════════════════════════════════════════════════════
   // 전역 상태
   // ═════════════════════════════════════════════════════════════
   let allSources = []
@@ -730,10 +744,238 @@
   }
 
   // ═════════════════════════════════════════════════════════════
+  // 🚀 "지금 발송" 버튼 로직
+  // ═════════════════════════════════════════════════════════════
+  let triggerPollTimer = null
+
+  function showConfirm(title, body, onOk) {
+    const m = document.getElementById('confirmModal')
+    document.getElementById('confirmTitle').textContent = title
+    document.getElementById('confirmBody').innerHTML = body
+    m.classList.remove('hidden')
+    const okBtn = document.getElementById('btnConfirmOk')
+    const cancelBtn = document.getElementById('btnConfirmCancel')
+    const close = () => m.classList.add('hidden')
+    const handler = () => {
+      close()
+      okBtn.removeEventListener('click', handler)
+      cancelBtn.removeEventListener('click', close)
+      onOk()
+    }
+    okBtn.addEventListener('click', handler, { once: true })
+    cancelBtn.addEventListener('click', close, { once: true })
+  }
+
+  function showTriggerStatus(cls, html) {
+    const el = document.getElementById('triggerStatus')
+    el.className = 'mt-3 p-3 rounded-lg text-xs sm:text-sm ' + cls
+    el.innerHTML = html
+    el.classList.remove('hidden')
+  }
+
+  async function checkTriggerConfig() {
+    try {
+      const s = await triggerApi.status()
+      if (!s.configured) {
+        showTriggerStatus(
+          'bg-amber-50 border border-amber-200 text-amber-800',
+          '<i class="fa-solid fa-triangle-exclamation mr-1"></i>' +
+            '<strong>PAT 미설정</strong> — "지금 발송" 기능을 쓰려면 ' +
+            'Cloudflare Secret 에 <code>GITHUB_TRIGGER_TOKEN</code> 을 등록하세요.'
+        )
+        document.getElementById('btnTriggerNow').disabled = true
+        document.getElementById('btnTriggerDryRun').disabled = true
+        document.getElementById('btnTriggerNow').classList.add('opacity-50', 'cursor-not-allowed')
+        document.getElementById('btnTriggerDryRun').classList.add('opacity-50', 'cursor-not-allowed')
+      }
+      return s
+    } catch {
+      return null
+    }
+  }
+
+  async function onTriggerClick(dryRun) {
+    const actionText = dryRun ? 'DRY RUN (메일 발송 없이 프리뷰만 생성)' : '실제 브리핑 발송'
+    const confirmBody = dryRun
+      ? '수집·AI요약만 수행하고 <strong>메일은 보내지 않습니다</strong>.<br>결과는 GitHub Actions 페이지의 artifact 로 다운로드 가능합니다.'
+      : '지금 즉시 <strong>모든 활성 수신자에게 메일</strong>이 발송됩니다.<br>약 1~3분 소요되며, 10분 쿨다운이 적용됩니다.'
+
+    showConfirm(
+      actionText + ' 실행',
+      confirmBody,
+      async () => {
+        showTriggerStatus(
+          'bg-blue-50 border border-blue-200 text-blue-800',
+          '<i class="fa-solid fa-spinner fa-spin mr-1"></i> 워크플로 요청 중…'
+        )
+        const res = await triggerApi.run(dryRun)
+        if (res.ok) {
+          showTriggerStatus(
+            'bg-green-50 border border-green-200 text-green-800',
+            `<i class="fa-solid fa-check-circle mr-1"></i>${res.message}
+             <a href="${res.runsUrl}" target="_blank" class="underline ml-2">진행 상황 보기 <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>`
+          )
+          // 상태 폴링 시작 (최대 3분, 10초 간격)
+          startPolling(Date.now(), dryRun)
+          toast('🚀 발송 요청 완료', 'success')
+        } else {
+          const hint = res.hint ? `<div class="text-xs mt-1 opacity-80">💡 ${escapeHtml(res.hint)}</div>` : ''
+          showTriggerStatus(
+            'bg-red-50 border border-red-200 text-red-700',
+            `<i class="fa-solid fa-circle-xmark mr-1"></i>${escapeHtml(res.error || '알 수 없는 오류')}${hint}`
+          )
+          toast('❌ 발송 요청 실패', 'error')
+        }
+      }
+    )
+  }
+
+  function startPolling(sinceMs, dryRun) {
+    clearInterval(triggerPollTimer)
+    let elapsed = 0
+    const MAX_MIN = 4
+    triggerPollTimer = setInterval(async () => {
+      elapsed += 10
+      if (elapsed > MAX_MIN * 60) {
+        clearInterval(triggerPollTimer)
+        return
+      }
+      const data = await triggerApi.recentRuns().catch(() => null)
+      if (!data || !data.ok || !data.runs || data.runs.length === 0) return
+
+      // 요청 시각 이후 생성된 워크플로 런 찾기 (오차 30초 허용)
+      const match = data.runs.find(
+        (r) => new Date(r.created_at).getTime() >= sinceMs - 30000
+      )
+      if (!match) return
+
+      if (match.status === 'completed') {
+        clearInterval(triggerPollTimer)
+        if (match.conclusion === 'success') {
+          showTriggerStatus(
+            'bg-green-50 border border-green-200 text-green-800',
+            `<i class="fa-solid fa-circle-check mr-1"></i><strong>실행 완료!</strong> ${
+              dryRun ? 'DRY RUN 성공 (메일 미발송)' : '이메일 발송 완료'
+            }
+            <a href="${match.html_url}" target="_blank" class="underline ml-2">상세 보기</a>`
+          )
+          toast(dryRun ? '✅ DRY RUN 성공' : '✉️ 발송 완료!', 'success')
+        } else {
+          showTriggerStatus(
+            'bg-red-50 border border-red-200 text-red-700',
+            `<i class="fa-solid fa-circle-xmark mr-1"></i><strong>실행 실패</strong> (${match.conclusion})
+            <a href="${match.html_url}" target="_blank" class="underline ml-2">로그 보기</a>`
+          )
+          toast('❌ 실행 실패', 'error')
+        }
+      } else {
+        // in_progress / queued
+        const statusKo =
+          match.status === 'queued' ? '대기 중' :
+          match.status === 'in_progress' ? '실행 중' : match.status
+        showTriggerStatus(
+          'bg-blue-50 border border-blue-200 text-blue-800',
+          `<i class="fa-solid fa-spinner fa-spin mr-1"></i>워크플로 <strong>${statusKo}</strong>… (${elapsed}초 경과)
+          <a href="${match.html_url}" target="_blank" class="underline ml-2">실시간 로그</a>`
+        )
+      }
+    }, 10000)
+  }
+
+  async function onCheckStatus() {
+    const el = document.getElementById('triggerStatus')
+    el.className = 'mt-3 p-3 rounded-lg text-xs sm:text-sm bg-blue-50 border border-blue-200 text-blue-800'
+    el.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> 조회 중…'
+    el.classList.remove('hidden')
+    const data = await triggerApi.recentRuns()
+    if (!data.ok) {
+      showTriggerStatus(
+        'bg-red-50 border border-red-200 text-red-700',
+        `❌ ${escapeHtml(data.error || '조회 실패')}`
+      )
+      return
+    }
+    if (!data.runs.length) {
+      showTriggerStatus(
+        'bg-gray-50 border border-gray-200 text-gray-600',
+        '<i class="fa-solid fa-info-circle mr-1"></i>최근 실행 기록이 없습니다.'
+      )
+      return
+    }
+    const rows = data.runs.slice(0, 5).map((r) => {
+      const icon =
+        r.status !== 'completed' ? '<i class="fa-solid fa-spinner fa-spin text-blue-500"></i>' :
+        r.conclusion === 'success' ? '<i class="fa-solid fa-circle-check text-green-500"></i>' :
+        '<i class="fa-solid fa-circle-xmark text-red-500"></i>'
+      const time = new Date(r.created_at).toLocaleString('ko-KR')
+      return `
+        <li class="flex items-center gap-2 py-1 text-xs">
+          ${icon}
+          <span class="text-gray-500">#${r.run_number}</span>
+          <span class="truncate flex-1">${escapeHtml(r.display_title || 'briefing')}</span>
+          <span class="text-gray-400 text-[11px]">${time}</span>
+          <a href="${r.html_url}" target="_blank" class="text-blue-600"><i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>
+        </li>`
+    }).join('')
+    showTriggerStatus(
+      'bg-white border border-gray-200 text-gray-700',
+      `<div class="font-semibold text-xs mb-2 text-gray-800"><i class="fa-solid fa-clock-rotate-left mr-1"></i>최근 5회 실행</div>
+       <ul class="divide-y divide-gray-100">${rows}</ul>`
+    )
+  }
+
+  function setupTriggerButtons() {
+    document.getElementById('btnTriggerNow').addEventListener('click', () => onTriggerClick(false))
+    document.getElementById('btnTriggerDryRun').addEventListener('click', () => onTriggerClick(true))
+    document.getElementById('btnCheckTriggerStatus').addEventListener('click', onCheckStatus)
+  }
+
+  // ═════════════════════════════════════════════════════════════
+  // 📱 PWA 설치 버튼
+  // ═════════════════════════════════════════════════════════════
+  let deferredInstallPrompt = null
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault()
+    deferredInstallPrompt = e
+    const btn = document.getElementById('btnInstallPwa')
+    if (btn) {
+      btn.classList.remove('hidden')
+      btn.addEventListener('click', async () => {
+        if (!deferredInstallPrompt) return
+        deferredInstallPrompt.prompt()
+        const { outcome } = await deferredInstallPrompt.userChoice
+        if (outcome === 'accepted') {
+          toast('📱 홈 화면에 설치됨', 'success')
+          btn.classList.add('hidden')
+        }
+        deferredInstallPrompt = null
+      }, { once: true })
+    }
+  })
+
+  window.addEventListener('appinstalled', () => {
+    toast('📱 앱이 설치되었습니다', 'success')
+  })
+
+  // URL ?action=trigger 로 진입하면 자동 스크롤 + 포커스
+  if (new URL(location.href).searchParams.get('action') === 'trigger') {
+    setTimeout(() => {
+      const btn = document.getElementById('btnTriggerNow')
+      if (btn) {
+        btn.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        btn.classList.add('ring-4', 'ring-orange-300')
+        setTimeout(() => btn.classList.remove('ring-4', 'ring-orange-300'), 2000)
+      }
+    }, 300)
+  }
+
+  // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
   setupTabs()
   setupGlobalEvents()
+  setupTriggerButtons()
   loadPresets().then(() => reload())
   reloadRecipients()
+  checkTriggerConfig()
 })()

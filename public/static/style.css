@@ -63,3 +63,120 @@ code {
     transform: translateY(0);
   }
 }
+
+/* ─────────────────────────────────────────────
+   📱 모바일 반응형 (v2.1)
+   ───────────────────────────────────────────── */
+
+/* 터치 타겟 최소 44px (Apple HIG 기준) */
+.touch-target {
+  min-height: 44px;
+}
+
+/* iOS safe-area 대응 */
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* iOS 입력창 줌인 방지 (16px 이상 강제) */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* 카테고리 탭 활성 상태 */
+.cat-tab.active {
+  color: #2563eb !important;
+  border-bottom-color: #2563eb !important;
+}
+
+/* 소스 카드 (v2) */
+.source-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px 14px;
+  transition: all 0.15s ease;
+  background: #fff;
+}
+.source-card:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08);
+}
+.source-card.disabled {
+  opacity: 0.55;
+  background: #f9fafb;
+}
+
+/* 검색어 태그 */
+.query-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 500;
+}
+.query-chip .limit {
+  font-size: 10px;
+  color: #64748b;
+}
+
+/* 모달 - 모바일에서 풀스크린 */
+@media (max-width: 640px) {
+  #editModal > div {
+    border-radius: 0;
+    max-height: 100vh;
+  }
+}
+
+/* PWA standalone 모드: 상태바 패딩 */
+@media (display-mode: standalone) {
+  body {
+    padding-top: max(env(safe-area-inset-top), 1rem);
+  }
+  header h1 {
+    font-size: 1.125rem;
+  }
+}
+
+/* 스크롤바 숨김 (카테고리 탭 가로스크롤) */
+#categoryTabs::-webkit-scrollbar {
+  display: none;
+}
+#categoryTabs {
+  scrollbar-width: none;
+}
+
+/* 토스트 애니메이션 */
+#toast {
+  animation: toastIn 0.2s ease-out;
+}
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@media (min-width: 640px) {
+  @keyframes toastIn {
+    from {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+}
