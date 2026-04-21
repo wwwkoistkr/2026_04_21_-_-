@@ -106,7 +106,7 @@ def run_pipeline() -> int:
     print("─" * 70 + f"\n(총 {len(markdown_summary):,} chars)\n")
 
     # 4) 이메일 발송 ------------------------------------------------------
-    subject = f"📊 일일 주식·반도체 브리핑 — {today_str}"
+    subject = f"🌅 Morning Stock AI — 일일 주식·반도체 브리핑 ({today_str})"
 
     if dry_run:
         logger.info("DRY_RUN=true → 메일 발송 생략")

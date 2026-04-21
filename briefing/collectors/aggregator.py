@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, List
 
+from briefing.collectors.custom_sources import collect_custom_sources
 from briefing.collectors.korean_news import collect_korean_news
 from briefing.collectors.us_news import get_us_news
 from briefing.collectors.youtube_news import get_youtube_news
@@ -20,9 +21,11 @@ def collect_all_data(
     korean_limit: int = 5,
     us_limit: int = 3,
     youtube_limit: int = 5,
+    custom_limit: int = 3,
 ) -> List[Dict[str, str]]:
     """
-    모든 소스(한국 3사, 미국 매체, 디일렉 유튜브)에서 수집 후 단일 리스트로 반환.
+    모든 소스(한국 3사, 미국 매체, 디일렉 유튜브, 사용자 등록 커스텀 소스)에서
+    수집 후 단일 리스트로 반환.
 
     반환 스키마는 항상 지침서 3.3 표준 양식:
       {source, title, link, summary}
@@ -47,7 +50,7 @@ def collect_all_data(
         logger.warning("미국 뉴스 수집 전체 실패: %s", exc)
         print(f"❌ 미국 뉴스 수집 전체 실패 (건너뜀): {exc}")
 
-    # 3) 디일렉 유튜브
+    # 3) 디일렉 유튜브 (내장)
     try:
         y = get_youtube_news(max_results=youtube_limit)
         all_news.extend(y)
@@ -55,6 +58,15 @@ def collect_all_data(
     except Exception as exc:  # noqa: BLE001
         logger.warning("유튜브 수집 전체 실패: %s", exc)
         print(f"❌ 유튜브 수집 전체 실패 (건너뜀): {exc}")
+
+    # 4) 사용자 등록 커스텀 소스 (Morning Stock AI 관리 UI 로부터)
+    try:
+        c = collect_custom_sources(per_source_limit=custom_limit)
+        all_news.extend(c)
+        print(f"🧩 사용자 등록 소스 누적: {len(c)}건")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("커스텀 소스 수집 전체 실패: %s", exc)
+        print(f"❌ 커스텀 소스 수집 전체 실패 (건너뜀): {exc}")
 
     # 중복 제거 (동일 링크 기준)
     deduped: List[Dict[str, str]] = []

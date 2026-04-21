@@ -1,34 +1,22 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "webapp",
+  "name": "morning-stock-briefing",
   "compatibility_date": "2026-04-13",
   "pages_build_output_dir": "./dist",
   "compatibility_flags": [
     "nodejs_compat"
+  ],
+  // ── KV: 사용자 등록 뉴스 소스 저장용 ─────────────────
+  // 로컬 개발은 --local 플래그로 자동 생성되는 미러 KV 사용.
+  // 프로덕션 배포 전에 아래 명령으로 실제 KV 생성 후 id 교체:
+  //   npx wrangler kv namespace create SOURCES_KV
+  "kv_namespaces": [
+    {
+      "binding": "SOURCES_KV",
+      "id": "local-placeholder-will-be-replaced-in-production"
+    }
   ]
-  // "vars": {
-  //   "MY_VAR": "my-variable"
-  // },
-  // "kv_namespaces": [
-  //   {
-  //     "binding": "MY_KV_NAMESPACE",
-  //     "id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  //   }
-  // ],
-  // "r2_buckets": [
-  //   {
-  //     "binding": "MY_BUCKET",
-  //     "bucket_name": "my-bucket"
-  //   }
-  // ],
-  // "d1_databases": [
-  //   {
-  //     "binding": "MY_DB",
-  //     "database_name": "my-database",
-  //     "database_id": ""
-  //   }
-  // ],
-  // "ai": {
-  //   "binding": "AI"
-  // }
+  // 로그인 비밀번호 / 브리핑 API 토큰은 wrangler secret 로 저장:
+  //   npx wrangler pages secret put ADMIN_PASSWORD
+  //   npx wrangler pages secret put BRIEFING_READ_TOKEN
 }

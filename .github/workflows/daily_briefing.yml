@@ -1,4 +1,4 @@
-name: Daily Stock & Semiconductor Briefing
+name: Morning Stock AI — Daily Briefing
 
 on:
   schedule:
@@ -42,6 +42,9 @@ jobs:
           # 선택 Secrets
           YOUTUBE_API_KEY:      ${{ secrets.YOUTUBE_API_KEY }}
           THELEC_YOUTUBE_CHANNEL_ID: ${{ secrets.THELEC_YOUTUBE_CHANNEL_ID }}
+          # Cloudflare 관리 콘솔(Hono) 연동 — 선택
+          BRIEFING_ADMIN_API:   ${{ secrets.BRIEFING_ADMIN_API }}
+          BRIEFING_READ_TOKEN:  ${{ secrets.BRIEFING_READ_TOKEN }}
           # 수동 실행 시 DRY_RUN 반영
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: python main.py

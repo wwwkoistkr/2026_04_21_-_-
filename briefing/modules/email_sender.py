@@ -111,9 +111,9 @@ HTML_TEMPLATE = """\
                style="background:#ffffff;border-radius:14px;box-shadow:0 4px 12px rgba(0,0,0,0.06);overflow:hidden;">
           <tr>
             <td style="background:linear-gradient(135deg,#1d4ed8,#0ea5e9);padding:24px 28px;color:#fff;">
-              <div style="font-size:12px;opacity:.85;letter-spacing:1px;">DAILY BRIEFING</div>
-              <div style="font-size:22px;font-weight:700;margin-top:6px;">📊 주식·반도체 일일 브리핑</div>
-              <div style="font-size:13px;margin-top:4px;opacity:.9;">{today}</div>
+              <div style="font-size:12px;opacity:.85;letter-spacing:1px;">MORNING STOCK AI · DAILY BRIEFING</div>
+              <div style="font-size:22px;font-weight:700;margin-top:6px;">🌅 Morning Stock AI Briefing Center</div>
+              <div style="font-size:13px;margin-top:4px;opacity:.9;">{today} · 주식·반도체 일일 브리핑</div>
             </td>
           </tr>
           <tr>
