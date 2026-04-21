@@ -62,24 +62,31 @@
 
 | 기능 | 엔드포인트 | 설명 |
 |---|---|---|
-| 로그인 화면 | `GET /login` | 비밀번호 단일 인증 |
+| 로그인 화면 | `GET /login` | 비밀번호 단일 인증 (기본: `admin1234`) |
 | 로그인 처리 | `POST /login` | `ADMIN_PASSWORD` 비교 후 HTTPOnly 세션 쿠키 |
 | 로그아웃 | `POST /logout` | 세션 쿠키 파기 |
-| 대시보드 | `GET /` | 소스 목록 + 추가 폼 (로그인 필요) |
+| 대시보드 | `GET /` | 수신자·소스 관리 (로그인 필요) |
+| **수신자 조회** | `GET /api/admin/recipients` | 브리핑 받을 이메일 목록 |
+| **수신자 추가** | `POST /api/admin/recipients` | 이메일 + 별명 등록 |
+| **수신자 토글/수정** | `PATCH /api/admin/recipients/:id` | 활성/비활성 |
+| **수신자 삭제** | `DELETE /api/admin/recipients/:id` | |
 | 소스 조회 | `GET /api/admin/sources` | 관리자용 (세션 필요) |
 | 소스 추가 | `POST /api/admin/sources` | URL 자동 판별 (RSS/YouTube/GoogleNews/Web) |
 | 소스 활성·라벨 수정 | `PATCH /api/admin/sources/:id` | 토글 |
 | 소스 삭제 | `DELETE /api/admin/sources/:id` | |
 | 즉석 테스트 | `POST /api/admin/test-source` | URL 을 실제 fetch → 제목 샘플 미리보기 |
-| **수집기 연동** | `GET /api/public/sources` | **Python 수집기가 호출** — Bearer 토큰 보호 |
+| **소스 연동** | `GET /api/public/sources` | **Python 수집기가 호출** — Bearer 토큰 보호 |
+| **수신자 연동** | `GET /api/public/recipients` | **Python 발송기가 호출** — Bearer 토큰 보호 |
 | 헬스체크 | `GET /api/health` | 상태 확인 |
 
 **관리 콘솔 기능 하이라이트**
-- 🔐 로그인 1회 후 12시간 세션 유지
+- 🔐 로그인 1회 후 12시간 세션 유지 (기본 비밀번호 `admin1234`)
+- 📬 **이메일 수신자 관리** — 여러 명에게 동시 발송, 별명·활성 토글 지원
 - 🧠 URL 붙여넣기만 해도 **RSS/YouTube/GoogleNews/웹 자동 판별**
 - 🧪 **추가 전 즉석 테스트** 버튼 — 실제 최근 제목 5건 미리보기
 - 🎛️ 활성/비활성 토글, 삭제 한 번에
 - 💾 Cloudflare KV 에 저장 → GitHub 푸시 불필요, 즉시 반영
+- 🌐 최초 접속 시 `koist.kr@gmail.com` 이 기본 수신자로 자동 등록
 
 ---
 

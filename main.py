@@ -110,13 +110,23 @@ def run_pipeline() -> int:
 
     if dry_run:
         logger.info("DRY_RUN=true → 메일 발송 생략")
+        # 수신자 목록 미리 조회 (실제 발송 시 누구에게 갈지 확인용)
+        from briefing.modules.email_sender import build_html_email, resolve_recipients
+
+        sender = os.getenv("EMAIL_SENDER", "(미설정)")
+        final_recipients = resolve_recipients(sender=sender if "@" in sender else None)
+        print(f"\n📬 실제 발송 시 수신자 ({len(final_recipients)}명):")
+        if final_recipients:
+            for r in final_recipients:
+                print(f"  - {r}")
+        else:
+            print("  (수신자 없음 — EMAIL_RECIPIENTS 환경변수 또는 관리 콘솔에 등록 필요)")
+
         # 로컬 프리뷰 저장
         preview_path = "/tmp/briefing_latest.html"
-        from briefing.modules.email_sender import build_html_email
-
         with open(preview_path, "w", encoding="utf-8") as f:
             f.write(build_html_email(markdown_summary, subject))
-        print(f"💾 HTML 프리뷰 저장: {preview_path}")
+        print(f"\n💾 HTML 프리뷰 저장: {preview_path}")
         return 0
 
     try:

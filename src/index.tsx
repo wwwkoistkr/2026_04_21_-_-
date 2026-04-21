@@ -29,14 +29,24 @@ interface NewsSource {
   createdAt: string   // ISO
 }
 
+interface EmailRecipient {
+  id: string          // 고유 ID
+  email: string       // 이메일 주소
+  label?: string      // 사용자 별명 (예: "본인", "업무용")
+  enabled: boolean
+  createdAt: string   // ISO
+}
+
 const app = new Hono<{ Bindings: Bindings }>()
 
 // ─────────────────────────────────────────────────────────────
 // 공통 상수 / 유틸
 // ─────────────────────────────────────────────────────────────
 const KV_KEY_SOURCES = 'sources:v1'        // 사용자 추가 소스 리스트
+const KV_KEY_RECIPIENTS = 'recipients:v1'  // 이메일 수신자 리스트
 const SESSION_COOKIE = 'msaic_session'     // 관리자 세션 쿠키
 const SESSION_TTL_SEC = 60 * 60 * 12       // 12시간
+const DEFAULT_RECIPIENT = 'koist.kr@gmail.com'  // 초기 기본 수신자
 
 function getSession(c: any): string | undefined {
   return getCookie(c, SESSION_COOKIE)
@@ -64,6 +74,33 @@ async function loadSources(env: Bindings): Promise<NewsSource[]> {
 
 async function saveSources(env: Bindings, list: NewsSource[]): Promise<void> {
   await env.SOURCES_KV.put(KV_KEY_SOURCES, JSON.stringify(list))
+}
+
+async function loadRecipients(env: Bindings): Promise<EmailRecipient[]> {
+  const raw = await env.SOURCES_KV.get(KV_KEY_RECIPIENTS, 'json')
+  if (!raw) {
+    // 최초 1회 기본 수신자 (koist.kr@gmail.com) 자동 등록
+    const seed: EmailRecipient[] = [
+      {
+        id: 'r_default',
+        email: DEFAULT_RECIPIENT,
+        label: '기본 수신자',
+        enabled: true,
+        createdAt: new Date().toISOString(),
+      },
+    ]
+    await env.SOURCES_KV.put(KV_KEY_RECIPIENTS, JSON.stringify(seed))
+    return seed
+  }
+  return raw as EmailRecipient[]
+}
+
+async function saveRecipients(env: Bindings, list: EmailRecipient[]): Promise<void> {
+  await env.SOURCES_KV.put(KV_KEY_RECIPIENTS, JSON.stringify(list))
+}
+
+function isValidEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim())
 }
 
 /** URL 을 자동 판별해서 type 을 결정한다. */
@@ -189,6 +226,48 @@ app.get('/', (c) => {
           </form>
         </div>
       </header>
+
+      {/* 이메일 수신자 관리 */}
+      <section class="bg-white rounded-2xl shadow p-6 mb-6">
+        <h2 class="text-lg font-bold text-gray-800 mb-4">
+          <i class="fa-solid fa-envelope text-emerald-500 mr-2"></i>
+          매일 아침 브리핑을 받을 이메일 주소
+        </h2>
+        <p class="text-sm text-gray-500 mb-4">
+          여기에 등록된 모든 이메일로 <strong>매일 아침 08:00 KST</strong> 브리핑이 발송됩니다.
+          여러 명을 등록할 수 있습니다.
+        </p>
+        <form id="addRecipientForm" class="grid grid-cols-1 md:grid-cols-[2fr_1fr_auto] gap-3">
+          <input
+            id="recipientEmail"
+            type="email"
+            required
+            placeholder="이메일 주소 (예: koist.kr@gmail.com)"
+            class="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+          <input
+            id="recipientLabel"
+            placeholder="별명 (선택, 예: 본인/업무용)"
+            class="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+          <button
+            type="submit"
+            class="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700"
+          >
+            <i class="fa-solid fa-plus mr-1"></i> 수신자 추가
+          </button>
+        </form>
+        <div class="flex items-center justify-between mt-5 mb-3">
+          <h3 class="text-sm font-semibold text-gray-700">
+            <i class="fa-solid fa-users mr-1 text-emerald-500"></i>
+            현재 등록된 수신자
+          </h3>
+          <span id="recipientCount" class="text-xs text-gray-500">(불러오는 중…)</span>
+        </div>
+        <div id="recipientList" class="space-y-2">
+          <div class="text-center text-gray-400 py-6 text-sm">불러오는 중…</div>
+        </div>
+      </section>
 
       {/* 새 소스 추가 폼 */}
       <section class="bg-white rounded-2xl shadow p-6 mb-6">
@@ -335,6 +414,69 @@ app.patch('/api/admin/sources/:id', async (c) => {
   return c.json({ ok: true, source: target })
 })
 
+// ─── 이메일 수신자 관리 ───────────────────────────────────────
+
+/** 수신자 목록 조회 */
+app.get('/api/admin/recipients', async (c) => {
+  const list = await loadRecipients(c.env)
+  return c.json({ recipients: list })
+})
+
+/** 수신자 추가 */
+app.post('/api/admin/recipients', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const email = String(body.email ?? '').trim().toLowerCase()
+  const label = String(body.label ?? '').trim()
+
+  if (!email) {
+    return c.json({ error: '이메일 주소는 필수입니다.' }, 400)
+  }
+  if (!isValidEmail(email)) {
+    return c.json({ error: '올바른 이메일 주소 형식이 아닙니다.' }, 400)
+  }
+
+  const list = await loadRecipients(c.env)
+  if (list.some((r) => r.email.toLowerCase() === email)) {
+    return c.json({ error: '이미 등록된 이메일입니다.' }, 409)
+  }
+
+  const newItem: EmailRecipient = {
+    id: 'r_' + Date.now().toString(36),
+    email,
+    label: label || undefined,
+    enabled: true,
+    createdAt: new Date().toISOString(),
+  }
+  list.push(newItem)
+  await saveRecipients(c.env, list)
+  return c.json({ ok: true, recipient: newItem })
+})
+
+/** 수신자 삭제 */
+app.delete('/api/admin/recipients/:id', async (c) => {
+  const id = c.req.param('id')
+  const list = await loadRecipients(c.env)
+  const next = list.filter((r) => r.id !== id)
+  if (next.length === list.length) {
+    return c.json({ error: 'not found' }, 404)
+  }
+  await saveRecipients(c.env, next)
+  return c.json({ ok: true })
+})
+
+/** 수신자 활성/비활성·라벨 수정 */
+app.patch('/api/admin/recipients/:id', async (c) => {
+  const id = c.req.param('id')
+  const body = await c.req.json().catch(() => ({}))
+  const list = await loadRecipients(c.env)
+  const target = list.find((r) => r.id === id)
+  if (!target) return c.json({ error: 'not found' }, 404)
+  if (typeof body.enabled === 'boolean') target.enabled = body.enabled
+  if (typeof body.label === 'string') target.label = body.label.trim() || undefined
+  await saveRecipients(c.env, list)
+  return c.json({ ok: true, recipient: target })
+})
+
 /** 소스 URL 즉석 테스트 — RSS 파싱해서 최근 제목 몇 개 반환 */
 app.post('/api/admin/test-source', async (c) => {
   const body = await c.req.json().catch(() => ({}))
@@ -417,16 +559,30 @@ function extractTitles(xml: string): string[] {
 // ═════════════════════════════════════════════════════════════
 // 5) 공개 API (Python 수집기가 호출) — Bearer 토큰 보호
 // ═════════════════════════════════════════════════════════════
-app.get('/api/public/sources', async (c) => {
-  const auth = c.req.header('Authorization') ?? ''
+function checkBearer(c: any): boolean {
   const expected = c.env.BRIEFING_READ_TOKEN
-  if (expected) {
-    const token = auth.replace(/^Bearer\s+/i, '')
-    if (token !== expected) return c.json({ error: 'unauthorized' }, 401)
-  }
+  if (!expected) return true  // 토큰이 설정 안 되어 있으면 허용(개발)
+  const auth = c.req.header('Authorization') ?? ''
+  const token = auth.replace(/^Bearer\s+/i, '')
+  return token === expected
+}
+
+app.get('/api/public/sources', async (c) => {
+  if (!checkBearer(c)) return c.json({ error: 'unauthorized' }, 401)
   const list = await loadSources(c.env)
   return c.json({
     sources: list.filter((s) => s.enabled),
+    generatedAt: new Date().toISOString(),
+  })
+})
+
+/** Python 이메일 발송 모듈이 호출 — 활성화된 수신자 이메일만 반환 */
+app.get('/api/public/recipients', async (c) => {
+  if (!checkBearer(c)) return c.json({ error: 'unauthorized' }, 401)
+  const list = await loadRecipients(c.env)
+  const emails = list.filter((r) => r.enabled).map((r) => r.email)
+  return c.json({
+    recipients: emails,
     generatedAt: new Date().toISOString(),
   })
 })

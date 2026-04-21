@@ -5,6 +5,9 @@
   - EMAIL_SENDER       : 보내는 Gmail 주소 (예: you@gmail.com)
   - EMAIL_APP_PASSWORD : Gmail 앱 비밀번호 (16자리)
   - EMAIL_RECIPIENTS   : 받는 이메일. 쉼표로 여러 개 가능 ("a@x.com,b@y.com")
+  - BRIEFING_ADMIN_API : (선택) Hono 관리 콘솔 URL. 이 값이 있으면 관리 콘솔에
+                         등록된 수신자도 함께 발송 대상에 포함됨.
+  - BRIEFING_READ_TOKEN: (선택) 위 Hono API 호출 시 Bearer 토큰.
 
 Markdown 으로 작성된 AI 브리핑을 예쁜 HTML 로 변환해 첨부 없이 본문 송신합니다.
 """
@@ -19,7 +22,86 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import List, Optional
 
+import requests
+
 logger = logging.getLogger(__name__)
+
+
+def fetch_recipients_from_admin(
+    admin_api: Optional[str] = None,
+    read_token: Optional[str] = None,
+    timeout: int = 10,
+) -> List[str]:
+    """
+    Hono 관리 콘솔에 등록된 활성 수신자 이메일 목록을 가져옵니다.
+    실패 시 빈 리스트를 반환(파이프라인이 멈추지 않도록).
+    """
+    admin_api = admin_api or os.getenv("BRIEFING_ADMIN_API")
+    read_token = read_token or os.getenv("BRIEFING_READ_TOKEN")
+
+    if not admin_api:
+        return []
+
+    url = admin_api.rstrip("/") + "/api/public/recipients"
+    headers = {"Accept": "application/json"}
+    if read_token:
+        headers["Authorization"] = f"Bearer {read_token}"
+
+    try:
+        logger.info("관리 콘솔에서 수신자 목록 요청: %s", url)
+        resp = requests.get(url, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        emails = data.get("recipients", [])
+        logger.info("관리 콘솔 수신자 %d명 수신: %s", len(emails), emails)
+        return [e for e in emails if isinstance(e, str) and "@" in e]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("관리 콘솔 수신자 조회 실패 (환경변수만 사용): %s", exc)
+        return []
+
+
+def resolve_recipients(
+    recipients: Optional[List[str]] = None,
+    sender: Optional[str] = None,
+) -> List[str]:
+    """
+    최종 수신자 목록 결정 우선순위:
+      1) 함수 인자로 직접 전달된 recipients
+      2) 환경변수 EMAIL_RECIPIENTS (쉼표 구분)
+      3) Hono 관리 콘솔의 /api/public/recipients
+      4) 그래도 비어 있으면 sender (발신자 본인)에게 발송
+    2) 와 3) 은 **합집합** 으로 처리하며 중복 제거합니다.
+    """
+    if recipients:
+        return list(dict.fromkeys(recipients))
+
+    collected: List[str] = []
+
+    # 2) 환경변수
+    env_recipients = os.getenv("EMAIL_RECIPIENTS", "")
+    for r in env_recipients.split(","):
+        r = r.strip()
+        if r and "@" in r:
+            collected.append(r)
+
+    # 3) Hono 관리 콘솔
+    admin_recipients = fetch_recipients_from_admin()
+    collected.extend(admin_recipients)
+
+    # 중복 제거 (순서 유지, 소문자 정규화)
+    seen = set()
+    result: List[str] = []
+    for r in collected:
+        key = r.strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            result.append(r.strip())
+
+    # 4) fallback: 본인
+    if not result and sender:
+        result = [sender]
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -177,11 +259,13 @@ def send_email(
             "EMAIL_SENDER / EMAIL_APP_PASSWORD 환경변수가 필요합니다."
         )
 
-    if recipients is None:
-        env_recipients = os.getenv("EMAIL_RECIPIENTS", "")
-        recipients = [r.strip() for r in env_recipients.split(",") if r.strip()]
-        if not recipients:
-            recipients = [sender]  # 본인에게 발송
+    # 수신자 목록: 환경변수 + Hono 관리 콘솔 병합
+    recipients = resolve_recipients(recipients=recipients, sender=sender)
+    if not recipients:
+        raise RuntimeError(
+            "수신자가 없습니다. EMAIL_RECIPIENTS 환경변수 또는 관리 콘솔에 최소 1명 등록해야 합니다."
+        )
+    logger.info("최종 발송 대상: %s", recipients)
 
     html_body = build_html_email(markdown_body, subject)
 
