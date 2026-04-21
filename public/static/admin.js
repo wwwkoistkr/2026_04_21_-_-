@@ -1,5 +1,5 @@
 /**
- * Morning Stock AI — Admin Dashboard Client Script v2.2.4
+ * Morning Stock AI — Admin Dashboard Client Script v2.2.5
  * ───────────────────────────────────────────────────────
  * - 카테고리 탭 (🇰🇷/🌎/📺/➕/전체)
  * - 소스 카드: 검색어 태그 표시, 편집/테스트/삭제 버튼
@@ -9,8 +9,8 @@
  * - 토스트 알림
  * - PC↔모바일 실시간 동기화 (BroadcastChannel + 폴링)
  * - 글로벌 에러 핸들러로 사용자에게 친절한 에러 표시
- * BUILD: 2026-04-21 v2.2.4
- * [v2.2.4] 🔴 CRITICAL FIX: 이메일 '발송완료' 오보고 + 로그인화면 복원
+ * BUILD: 2026-04-21 v2.2.5
+ * [v2.2.5] 🔴 CRITICAL FIX: 이메일 '발송완료' 오보고 + 로그인화면 복원
  *   - Python email_sender: sendmail() 거부 수신자 dict 검사 → 일부 실패도 감지
  *   - Gmail 스팸 분류 낮추는 헤더 추가 (Reply-To, List-Unsubscribe, Date)
  *   - BRIEFING_READ_TOKEN 401/403 시 명확한 진단 로그 → 관리UI 수신자 반영 안되는 상황 가시화
@@ -1065,7 +1065,7 @@
       if (match.status === 'completed') {
         clearInterval(triggerPollTimer)
         if (match.conclusion === 'success') {
-          // (v2.2.4) 실제 발송 완료 시 스팸 폴더 확인 안내 - 과거 사용자가
+          // (v2.2.5) 실제 발송 완료 시 스팸 폴더 확인 안내 - 과거 사용자가
           // '워크플로 성공'만 보고 받은메일함에서 못 찾아 "발송 안됨"으로 오해한 버그 대응
           const spamHint = dryRun ? '' :
             '<div class="text-xs mt-2 p-2 bg-white/60 rounded border border-green-300 text-green-900">' +
@@ -1146,6 +1146,155 @@
       `<div class="font-semibold text-xs mb-2 text-gray-800"><i class="fa-solid fa-clock-rotate-left mr-1"></i>최근 5회 실행</div>
        <ul class="divide-y divide-gray-100">${rows}</ul>`
     )
+  }
+
+  // ═════════════════════════════════════════════════════════════
+  // 🩺 (v2.2.5) 수신자 동기화 진단 + MailChannels 즉시 테스트
+  //   네이버/다음 수신자에게 메일이 안 가는 문제의 근본 원인(BRIEFING_READ_TOKEN
+  //   CF↔GH 불일치)을 즉시 파악하고, 테스트 발송으로 스팸 필터 여부까지 점검.
+  // ═════════════════════════════════════════════════════════════
+  function showDiagStatus(kind, html) {
+    const el = document.getElementById('diagStatus')
+    if (!el) return
+    el.className = 'mt-3 p-3 rounded-lg text-xs sm:text-sm break-words'
+    if (kind === 'success') el.classList.add('bg-emerald-50', 'border', 'border-emerald-200', 'text-emerald-800')
+    else if (kind === 'error') el.classList.add('bg-rose-50', 'border', 'border-rose-200', 'text-rose-800')
+    else if (kind === 'warn') el.classList.add('bg-amber-50', 'border', 'border-amber-200', 'text-amber-800')
+    else el.classList.add('bg-sky-50', 'border', 'border-sky-200', 'text-sky-800')
+    el.innerHTML = html
+    el.classList.remove('hidden')
+  }
+
+  async function onDiagSync() {
+    const btn = document.getElementById('btnDiagSync')
+    if (btn) btn.disabled = true
+    showDiagStatus('info', '<i class="fa-solid fa-spinner fa-spin mr-1"></i>진단 정보를 수집 중…')
+    try {
+      const resp = await fetch('/api/admin/diag-recipient-sync', { credentials: 'same-origin' })
+      const data = await resp.json()
+      if (!data.ok) {
+        showDiagStatus('error', `<strong>❌ 진단 실패</strong><br/>${data.error || 'unknown error'}`)
+        return
+      }
+
+      const emails = Array.isArray(data.activeRecipients) ? data.activeRecipients : []
+      const emailList = emails.map(e => `<code class="bg-white px-1.5 py-0.5 rounded border border-sky-200">${e}</code>`).join(' ')
+      const secretValue = data.emailRecipientsSecret || ''
+
+      const tokenStatus = data.tokenConfigured
+        ? `<span class="inline-block bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-xs font-semibold">CF 설정됨</span>
+           <code class="bg-white px-1.5 py-0.5 rounded border border-sky-200 text-xs">hash: ${data.tokenHashPrefix || '?'}…</code>`
+        : `<span class="inline-block bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full text-xs font-semibold">❌ CF 미설정</span>`
+
+      const html = `
+        <div class="space-y-2">
+          <div><strong>🩺 진단 결과</strong></div>
+          <div class="bg-white/60 p-2 rounded border border-sky-200">
+            <div class="mb-1"><strong>1. Cloudflare BRIEFING_READ_TOKEN</strong>: ${tokenStatus}</div>
+            <div class="text-xs text-gray-600">→ 이 해시(앞 8자리)와 <strong>GitHub Repo Secrets 의 BRIEFING_READ_TOKEN</strong> 이 같은 값을 가리키는지 확인하세요.</div>
+          </div>
+          <div class="bg-white/60 p-2 rounded border border-sky-200">
+            <div class="mb-1"><strong>2. 관리 UI 활성 수신자</strong>: ${data.activeRecipientCount}명</div>
+            <div class="flex flex-wrap gap-1 mt-1">${emailList || '<em class="text-gray-500">없음</em>'}</div>
+          </div>
+          ${secretValue ? `
+          <div class="bg-amber-50 p-2 rounded border border-amber-300">
+            <div class="mb-2"><strong>🔧 즉시 해결책 (권장)</strong></div>
+            <div class="text-xs mb-2">아래 문자열을 복사해서 <strong>GitHub Repo → Settings → Secrets and variables → Actions</strong> 의 <code>EMAIL_RECIPIENTS</code> 값으로 저장하세요. 그러면 토큰 일치 여부와 관계없이 모든 수신자에게 발송됩니다.</div>
+            <div class="flex gap-2 items-start">
+              <code id="diagSecretValue" class="flex-1 bg-white p-2 rounded border border-amber-200 text-xs break-all select-all">${secretValue}</code>
+              <button type="button" id="btnCopySecret" class="px-3 py-1.5 bg-amber-500 text-white text-xs font-semibold rounded hover:bg-amber-600 transition whitespace-nowrap">
+                <i class="fa-solid fa-copy mr-1"></i>복사
+              </button>
+            </div>
+          </div>
+          ` : ''}
+          <div class="bg-white/60 p-2 rounded border border-sky-200 text-xs">
+            <div class="font-semibold mb-1">📋 검증 명령어 (복붙)</div>
+            <code class="block bg-gray-900 text-emerald-300 p-2 rounded whitespace-pre-wrap break-all">${data.hints && data.hints.verifyCmd ? data.hints.verifyCmd.replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''}</code>
+          </div>
+        </div>`
+      showDiagStatus('info', html)
+
+      // 복사 버튼
+      const copyBtn = document.getElementById('btnCopySecret')
+      if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(secretValue)
+            copyBtn.innerHTML = '<i class="fa-solid fa-check mr-1"></i>복사됨'
+            toast('📋 클립보드에 복사됨 — GitHub Secret EMAIL_RECIPIENTS 에 붙여넣으세요', 'success')
+            setTimeout(() => { copyBtn.innerHTML = '<i class="fa-solid fa-copy mr-1"></i>복사' }, 3000)
+          } catch (e) {
+            toast('클립보드 복사 실패 — 수동으로 선택 후 Ctrl+C 하세요', 'error')
+          }
+        })
+      }
+    } catch (e) {
+      showDiagStatus('error', `<strong>❌ 진단 요청 실패</strong><br/>${(e && e.message) || e}`)
+    } finally {
+      if (btn) btn.disabled = false
+    }
+  }
+
+  async function onDiagSendTest() {
+    const input = document.getElementById('diagTestEmail')
+    const btn = document.getElementById('btnDiagSendTest')
+    const email = (input && input.value || '').trim()
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast('유효한 이메일 주소를 입력하세요', 'error')
+      if (input) input.focus()
+      return
+    }
+    if (!(await showConfirm({
+      title: '즉시 테스트 발송',
+      message: `${email} 로 MailChannels 경유 테스트 메일을 발송합니다.\n(GitHub Actions 우회 → 결과 즉시 확인 가능)\n\n받은편지함과 스팸/프로모션 폴더를 모두 확인하세요.`,
+      confirmText: '발송',
+      cancelText: '취소',
+    }))) return
+
+    if (btn) btn.disabled = true
+    showDiagStatus('info', `<i class="fa-solid fa-spinner fa-spin mr-1"></i>${email} 로 테스트 메일 발송 중…`)
+    try {
+      const resp = await fetch('/api/admin/send-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email }),
+      })
+      const data = await resp.json()
+      if (data.ok) {
+        showDiagStatus('success',
+          `<strong>✅ 테스트 발송 성공 (경유: ${data.via || 'mailchannels'})</strong><br/>` +
+          `수신자: <code class="bg-white px-1.5 py-0.5 rounded">${email}</code><br/>` +
+          `<div class="mt-2 text-xs">` +
+          `💡 <strong>확인 순서</strong>: ① 받은편지함 → ② 스팸 폴더 → ③ 프로모션 탭 (Gmail) / 전체편지함 (네이버)<br/>` +
+          `💡 스팸 폴더에 있으면 '스팸 아님' 처리 후 발신자를 <strong>주소록</strong>에 추가해 주세요.` +
+          `</div>`)
+        toast(`📬 ${email} 로 테스트 메일 발송됨`, 'success')
+      } else {
+        showDiagStatus('error',
+          `<strong>❌ 테스트 발송 실패</strong><br/>` +
+          `<code class="bg-white px-1 py-0.5 rounded text-xs">${data.error || 'unknown'}</code><br/>` +
+          (data.hint ? `<div class="mt-1 text-xs">💡 ${data.hint}</div>` : ''))
+      }
+    } catch (e) {
+      showDiagStatus('error', `<strong>❌ 네트워크 오류</strong><br/>${(e && e.message) || e}`)
+    } finally {
+      if (btn) btn.disabled = false
+    }
+  }
+
+  function setupDiagButtons() {
+    const diagBtn = document.getElementById('btnDiagSync')
+    const testBtn = document.getElementById('btnDiagSendTest')
+    const testInput = document.getElementById('diagTestEmail')
+    if (diagBtn) diagBtn.addEventListener('click', onDiagSync)
+    if (testBtn) testBtn.addEventListener('click', onDiagSendTest)
+    // Enter 키로 테스트 발송
+    if (testInput) testInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); onDiagSendTest() }
+    })
   }
 
   function setupTriggerButtons() {
@@ -1280,10 +1429,11 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.2.4 초기화 중…')
+  console.log('[MorningStock] Admin v2.2.5 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
+  setupDiagButtons()
   loadPresets().then(() => reload())
   reloadRecipients()
   checkTriggerConfig()

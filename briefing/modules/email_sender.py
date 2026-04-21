@@ -293,71 +293,104 @@ def send_email(
     masked = [_mask_email(r) for r in recipients]
     logger.info("최종 발송 대상: %d명 → %s", len(recipients), masked)
     print(f"📬 최종 발송 대상: {len(recipients)}명 → {', '.join(masked)}")
+    # (v2.2.5) 도메인별 카운트 — 네이버/구글 도착 여부 분석을 쉽게
+    from collections import Counter
+    domain_counter = Counter(r.split("@", 1)[1].lower() if "@" in r else "?" for r in recipients)
+    print(f"   도메인별: {dict(domain_counter)}")
 
     html_body = build_html_email(markdown_body, subject)
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = ", ".join(recipients)
-    # (v2.2.4) 스팸 분류를 낮추기 위한 표준 헤더
-    msg["Reply-To"] = sender
-    msg["Date"] = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
-    # Gmail 은 List-Unsubscribe 헤더가 있는 자동 발송 메일을 '마케팅/알림' 으로 분류하되
-    # 신뢰성 점수를 올리는 긍정적 효과가 있음
-    msg["List-Unsubscribe"] = f"<mailto:{sender}?subject=unsubscribe>"
-    msg["X-Mailer"] = "MorningStockAI-BriefingCenter/2.2.4"
-
-    # 텍스트 대체본 & HTML 본문
-    msg.attach(MIMEText(markdown_body, "plain", "utf-8"))
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
-
     logger.info("SMTP 연결: %s:%d", smtp_host, smtp_port)
     print(f"📡 SMTP 연결: {smtp_host}:{smtp_port}")
+
+    # (v2.2.5) 🔴 핵심 변경: 수신자별 개별 발송
+    # --------------------------------------------------------------
+    # 과거 버그: bulk sendmail() 로 모든 수신자를 To: 에 넣어 전송했더니
+    #  1) Gmail → Naver 전달 시 "To: 여러 명" 패턴이 스팸 점수를 급격히 올렸고,
+    #  2) 네이버는 외부 도메인으로부터 받은 다중 수신자 메일을 기본적으로 스팸 폴더로 보냄.
+    #
+    # v2.2.5 부터는 각 수신자에게 **개별 To:** 로 발송 → 받는 사람이 자신을 유일한
+    # 수신자로 인식 → 스팸 분류 확률이 크게 낮아짐 (Naver/Daum/Kakao 메일에 효과적).
+    # --------------------------------------------------------------
+    accepted: List[str] = []
+    rejected_report: List[dict] = []
+
     try:
         with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as server:
             server.login(sender, app_password)
-            # sendmail() 반환값: {거부된_수신자: (코드, 사유_bytes), ...}
-            rejected = server.sendmail(sender, recipients, msg.as_string())
+
+            for idx, recipient in enumerate(recipients, start=1):
+                # 수신자마다 새 MIMEMessage 생성 (To 헤더가 본인만 나오도록)
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject
+                msg["From"] = sender
+                msg["To"] = recipient
+                msg["Reply-To"] = sender
+                msg["Date"] = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
+                msg["List-Unsubscribe"] = f"<mailto:{sender}?subject=unsubscribe>"
+                msg["X-Mailer"] = "MorningStockAI-BriefingCenter/2.2.5"
+                # 고유 Message-ID — 중복 메일 탐지 방지
+                msg["Message-ID"] = f"<msaic-{int(datetime.utcnow().timestamp()*1000)}-{idx}@{sender.split('@')[-1]}>"
+
+                # 텍스트 + HTML 동시 첨부 (네이버는 text/plain 도 잘 체크함)
+                msg.attach(MIMEText(markdown_body, "plain", "utf-8"))
+                msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+                try:
+                    refused = server.sendmail(sender, [recipient], msg.as_string())
+                    if refused:
+                        # 개별 발송인데 refused 가 차있는 경우 — 이 수신자가 거부됨
+                        code, reason = (0, "unknown")
+                        if recipient in refused:
+                            v = refused[recipient]
+                            if isinstance(v, tuple):
+                                code = v[0]
+                                reason = v[1].decode('utf-8', 'replace') if isinstance(v[1], (bytes, bytearray)) else str(v[1])
+                        rejected_report.append({"recipient": recipient, "code": code, "reason": reason})
+                        print(f"   {idx}/{len(recipients)}. ❌ {_mask_email(recipient)} → SMTP {code}: {reason}")
+                    else:
+                        accepted.append(recipient)
+                        print(f"   {idx}/{len(recipients)}. ✅ {_mask_email(recipient)} 수락됨")
+                except smtplib.SMTPRecipientsRefused as exc:
+                    info = exc.recipients.get(recipient) if hasattr(exc, 'recipients') else None
+                    code, reason = (info[0], info[1].decode('utf-8', 'replace')) if info else (0, str(exc))
+                    rejected_report.append({"recipient": recipient, "code": code, "reason": reason})
+                    print(f"   {idx}/{len(recipients)}. ❌ {_mask_email(recipient)} → SMTP {code}: {reason}")
+                except smtplib.SMTPDataError as exc:
+                    rejected_report.append({"recipient": recipient, "code": exc.smtp_code, "reason": str(exc.smtp_error)})
+                    print(f"   {idx}/{len(recipients)}. ❌ {_mask_email(recipient)} → SMTP {exc.smtp_code}: {exc.smtp_error}")
+                except Exception as exc:  # noqa: BLE001
+                    rejected_report.append({"recipient": recipient, "code": -1, "reason": str(exc)})
+                    print(f"   {idx}/{len(recipients)}. ❌ {_mask_email(recipient)} → 기타 오류: {exc}")
     except smtplib.SMTPAuthenticationError as exc:
-        # Gmail 앱 비밀번호 문제의 전형적 원인
         hint = (
             " Gmail 앱 비밀번호(16자리)가 올바른지 확인하세요. "
             "일반 비밀번호는 사용할 수 없으며, 2단계 인증이 활성화되어 있어야 합니다."
         )
         logger.error("SMTP 인증 실패: %s%s", exc, hint)
         raise RuntimeError(f"SMTP 인증 실패: {exc}.{hint}") from exc
-    except smtplib.SMTPRecipientsRefused as exc:
-        logger.error("모든 수신자가 SMTP 서버에 의해 거부됨: %s", exc.recipients)
+
+    # 결과 요약
+    print("")
+    print(f"📊 발송 결과: 수락 {len(accepted)}/{len(recipients)}, 거부 {len(rejected_report)}")
+    if accepted:
+        print(f"   ✅ 수락: {', '.join(_mask_email(r) for r in accepted)}")
+    if rejected_report:
+        print(f"   ❌ 거부: {[_mask_email(r['recipient']) for r in rejected_report]}")
+        for item in rejected_report:
+            print(f"      • {_mask_email(item['recipient'])} → SMTP {item['code']}: {item['reason']}")
+
+    logger.info("메일 발송 완료: %d/%d 수락, %d 거부", len(accepted), len(recipients), len(rejected_report))
+
+    # 모두 거부된 경우에만 예외
+    if not accepted:
         raise RuntimeError(
-            f"모든 수신자가 SMTP 서버에 의해 거부되었습니다: {exc.recipients}. "
-            "EMAIL_RECIPIENTS 환경변수의 주소 형식/철자를 확인하세요."
-        ) from exc
+            "모든 수신자가 SMTP 서버에 의해 거부되었습니다. 위 로그의 SMTP 코드/사유를 확인하세요. "
+            "Gmail 앱 비밀번호 만료 또는 발신자 주소 문제일 가능성이 높습니다."
+        )
 
-    # (v2.2.4) 일부 수신자 거부 검사 - 과거엔 이 케이스를 놓쳐 '성공'으로 잘못 보고했음
-    accepted = [r for r in recipients if r not in (rejected or {})]
-    print(f"✅ 수락된 수신자: {len(accepted)}명 → {', '.join(_mask_email(r) for r in accepted)}")
-    if rejected:
-        rejected_info = {
-            r: (
-                (v[0] if isinstance(v, tuple) else str(v)),
-                (v[1].decode('utf-8', 'replace') if isinstance(v, tuple) and isinstance(v[1], (bytes, bytearray)) else str(v)),
-            )
-            for r, v in rejected.items()
-        }
-        logger.warning("일부 수신자 거부됨 (%d명): %s", len(rejected), rejected_info)
-        print(f"⚠️  거부된 수신자: {len(rejected)}명 → {list(rejected_info.keys())}")
-        for r, (code, reason) in rejected_info.items():
-            print(f"   • {_mask_email(r)} → SMTP {code}: {reason}")
-        # 수락된 사람이 한 명도 없으면 완전 실패로 간주하고 예외
-        if not accepted:
-            raise RuntimeError(
-                "모든 수신자가 SMTP 서버에 의해 거부되었습니다. 위 로그에서 SMTP 코드/사유를 확인하세요."
-            )
-
-    logger.info("메일 발송 완료: %d/%d 수락", len(accepted), len(recipients))
-    print(f"✉️  메일 발송 완료: {len(accepted)}/{len(recipients)}명 수락됨 → {', '.join(_mask_email(r) for r in accepted)}")
     print("   💡 메일이 안 보이면 스팸/프로모션 폴더를 확인해 주세요.")
+    print("   💡 네이버 메일 사용자: '이 메일을 스팸이 아님으로 설정' + 발신자를 '안전 발신인' 에 등록")
 
 
 def _mask_email(email: str) -> str:

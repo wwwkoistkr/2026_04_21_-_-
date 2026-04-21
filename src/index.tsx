@@ -24,6 +24,9 @@ type Bindings = {
   GITHUB_TRIGGER_TOKEN?: string        // GitHub PAT (repo + workflow 권한) — 지금 발송용
   GITHUB_REPO?: string                 // 예: "wwwkoistkr/2026_04_21_-_-" (기본값 하드코딩)
   GITHUB_WORKFLOW_FILE?: string        // 예: "daily_briefing.yml"
+  // (v2.2.5) MailChannels 기반 테스트 발송용 — Cloudflare 에서 바로 보낼 때 사용
+  EMAIL_SENDER?: string                // 발신자 Gmail 주소 (GitHub Secret 과 동일)
+  EMAIL_APP_PASSWORD?: string          // 참조용 (Cloudflare Worker 에서는 SMTP 불가)
 }
 
 type SourceType = 'rss' | 'google_news' | 'youtube' | 'web'
@@ -69,7 +72,7 @@ const KV_KEY_RECIPIENTS = 'recipients:v1'
 const KV_KEY_LAST_TRIGGER = 'trigger:last'     // "지금 발송" rate-limit 용
 const KV_KEY_SYNC_VERSION = 'sync:version'     // PC ↔ 모바일 실시간 동기화용 카운터
 const SESSION_COOKIE = 'msaic_session'
-// (v2.2.4) 12시간 → 2시간으로 단축. 사용자 요구 "첫 화면에 비밀번호"
+// (v2.2.5) 12시간 → 2시간으로 단축. 사용자 요구 "첫 화면에 비밀번호"
 // 를 만족시키기 위함. 자주 사용하는 사용자는 모바일 PWA에 저장된 비밀번호로
 // 바로 로그인되므로 UX 저하는 미미함.
 const SESSION_TTL_SEC = 60 * 60 * 2            // 2시간
@@ -368,7 +371,7 @@ app.post('/logout', (c) => {
   return c.redirect('/login?logout=1')
 })
 
-// (v2.2.4) GET 요청으로도 로그아웃 가능 — 모바일 PWA 북마크/빠른 실행용
+// (v2.2.5) GET 요청으로도 로그아웃 가능 — 모바일 PWA 북마크/빠른 실행용
 app.get('/logout', (c) => {
   setCookie(c, SESSION_COOKIE, '', { path: '/', maxAge: 0 })
   return c.redirect('/login?logout=1')
@@ -398,7 +401,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.2.4
+                Daily Briefing Admin v2.2.5
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -449,6 +452,38 @@ app.get('/', (c) => {
             class="touch-target px-4 py-3 sm:py-2.5 bg-white border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition" title="최근 워크플로 실행 상태 확인">
             <i class="fa-solid fa-rotate"></i>
           </button>
+        </div>
+      </section>
+
+      {/* 🩺 (v2.2.5) 수신자 동기화 진단 + MailChannels 직접 테스트 — 네이버 미수신 해결용 */}
+      <section class="bg-gradient-to-br from-sky-50 to-indigo-50 border-2 border-sky-200 rounded-2xl shadow p-4 sm:p-6 mb-6">
+        <div class="flex items-start gap-3 sm:gap-4">
+          <div class="flex-shrink-0 text-3xl sm:text-4xl pt-1">🩺</div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-base sm:text-lg font-bold text-gray-800">
+              수신자 동기화 진단 · 네이버/다음 미수신 해결
+            </h2>
+            <p class="text-xs sm:text-sm text-gray-600 mt-1">
+              관리 UI에 등록한 수신자가 실제 GitHub Actions 파이프라인에 반영되지 않을 때 사용하세요.
+              <strong>토큰 해시</strong> 를 대조하고, 특정 이메일로 <strong>즉시 테스트 발송</strong> 이 가능합니다.
+            </p>
+            <div id="diagStatus" class="hidden mt-3 p-3 rounded-lg text-xs sm:text-sm"></div>
+          </div>
+        </div>
+        <div class="flex flex-col sm:flex-row gap-2 mt-4 sm:mt-3 sm:ml-16">
+          <button id="btnDiagSync"
+            class="touch-target flex-1 sm:flex-initial px-4 py-3 sm:py-2.5 bg-gradient-to-r from-sky-500 to-indigo-500 text-white font-semibold rounded-lg hover:from-sky-600 hover:to-indigo-600 transition shadow-sm">
+            <i class="fa-solid fa-stethoscope mr-1"></i>🩺 토큰·수신자 진단
+          </button>
+          <div class="flex-1 flex gap-2">
+            <input id="diagTestEmail" type="email" autocomplete="email" inputmode="email"
+              placeholder="테스트 이메일 주소 (예: hjlee12000@naver.com)"
+              class="touch-target flex-1 min-w-0 px-3 py-2.5 border border-sky-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500" />
+            <button id="btnDiagSendTest"
+              class="touch-target px-3 py-2.5 bg-white border border-sky-400 text-sky-700 font-medium rounded-lg hover:bg-sky-50 transition whitespace-nowrap">
+              <i class="fa-solid fa-paper-plane mr-1"></i>즉시 테스트
+            </button>
+          </div>
         </div>
       </section>
 
@@ -568,7 +603,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2.4</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2.5</span></p>
         <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -624,7 +659,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="toast-hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js?v=2.2.4"></script>
+      <script src="/static/admin.js?v=2.2.5"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )
@@ -691,6 +726,171 @@ app.get('/api/admin/trigger-status', async (c) => {
     cooldownRemainMs: cooldownRemain,
     last,
   })
+})
+
+/**
+ * (v2.2.5) 수신자 동기화 진단 — "왜 이메일이 특정 사람에게만 가는가" 해결용
+ *
+ * 관리 UI 에 등록된 수신자들이 실제 GitHub Actions 파이프라인에 반영되려면
+ * Cloudflare Pages 의 BRIEFING_READ_TOKEN 과 GitHub Secrets 의 BRIEFING_READ_TOKEN
+ * 값이 정확히 일치해야 한다. 이 API 는 **토큰을 직접 노출하지 않고**
+ * 다음을 제공한다:
+ *   1) BRIEFING_READ_TOKEN 설정 여부 및 해시 앞 8자리
+ *   2) 관리 UI 의 활성 수신자 전체 목록 (이메일)
+ *   3) 사용자가 바로 실행할 수 있는 **curl 테스트 명령어** (토큰을 그대로 쓰지 않음)
+ *   4) EMAIL_RECIPIENTS 환경변수로 그대로 붙여넣을 수 있는 **쉼표 구분 문자열**
+ */
+app.get('/api/admin/diag-recipient-sync', async (c) => {
+  const token = c.env.BRIEFING_READ_TOKEN ?? ''
+  const tokenConfigured = token.length > 0
+  let tokenHashPrefix: string | null = null
+  if (tokenConfigured) {
+    const hash = await sha256Hex(token)
+    tokenHashPrefix = hash.slice(0, 8)
+  }
+
+  const allRecipients = await loadRecipients(c.env)
+  const activeEmails = allRecipients.filter((r) => r.enabled).map((r) => r.email)
+
+  // 사용자가 "이 값을 그대로 GitHub Secret EMAIL_RECIPIENTS 에 붙여넣으세요"
+  // 하고 쓸 수 있도록 comma-separated string 생성
+  const emailRecipientsSecret = activeEmails.join(',')
+
+  const origin = new URL(c.req.url).origin
+
+  return c.json({
+    ok: true,
+    tokenConfigured,
+    tokenHashPrefix,  // 예: "a1b2c3d4" — GitHub Secrets 값 해시와 비교용
+    adminApi: origin,
+    endpoint: `${origin}/api/public/recipients`,
+    activeRecipientCount: activeEmails.length,
+    activeRecipients: activeEmails,
+    emailRecipientsSecret,  // 복붙용: "a@x.com,b@y.com,c@z.com"
+    hints: {
+      quickFix: [
+        `위 emailRecipientsSecret 값 (${activeEmails.length}개 이메일) 을 GitHub Repo 의 Secrets → EMAIL_RECIPIENTS 에 저장하면 BRIEFING_READ_TOKEN 일치 여부와 상관없이 즉시 모든 수신자에게 발송됩니다.`,
+        `또는 Cloudflare Pages Settings → Environment variables 의 BRIEFING_READ_TOKEN 값을 확인하고 (해시 앞자리: ${tokenHashPrefix ?? '미설정'}), 동일 값을 GitHub Secrets 의 BRIEFING_READ_TOKEN 에 저장하세요.`,
+      ],
+      verifyCmd: tokenConfigured
+        ? `curl -H "Authorization: Bearer <YOUR_TOKEN>" ${origin}/api/public/recipients\n# 200 이면 토큰 일치, 401 이면 불일치`
+        : `curl ${origin}/api/public/recipients   # 토큰 미설정 상태 → 검증 불가`,
+    },
+  })
+})
+
+/**
+ * (v2.2.5) SMTP 직접 발송 테스트 — 관리 UI 에서 특정 수신자에게만 테스트 메일
+ *  - GitHub Actions 우회 → Cloudflare Worker 에서 직접 발송 (즉시 결과 확인)
+ *  - BRIEFING_READ_TOKEN 문제와 무관하게 동작
+ *  - 네이버/구글/기타 수신자 도착 여부를 각각 빠르게 점검 가능
+ *
+ *  Body: { email: "hjlee12000@naver.com" }  // 단일 수신자
+ */
+app.post('/api/admin/send-test', async (c) => {
+  const sender = c.env.EMAIL_SENDER
+  const appPassword = c.env.EMAIL_APP_PASSWORD
+  if (!sender || !appPassword) {
+    return c.json({
+      ok: false,
+      error: 'EMAIL_SENDER / EMAIL_APP_PASSWORD Cloudflare Secret 이 설정되지 않았습니다.',
+      hint: 'Cloudflare Pages → Settings → Environment variables 에서 등록하세요.',
+    }, 503)
+  }
+
+  const body = await c.req.json().catch(() => ({}))
+  const target = String(body.email ?? '').trim()
+  if (!isValidEmail(target)) {
+    return c.json({ ok: false, error: '유효한 email 주소가 필요합니다.' }, 400)
+  }
+
+  // Cloudflare Workers 는 SMTP 를 직접 열 수 없으므로,
+  // MailChannels (무료 이메일 API) 를 통해 발송
+  // - Cloudflare Workers 에 공식 통합되어 있으며, Cloudflare IP 로부터의 전송은 자동 인증됨
+  // - Custom domain 이 없어도 fallback 송신자 'briefing@morning-stock-briefing.pages.dev' 사용 가능
+  const subject = '[Morning Stock AI] 테스트 이메일 — 수신 확인용'
+  const now = new Date()
+  const textBody = [
+    '안녕하세요,',
+    '',
+    '이 메일은 Morning Stock AI Briefing Center 의 수신 테스트 메일입니다.',
+    `관리 UI 로부터 ${now.toLocaleString('ko-KR')} 에 발송되었습니다.`,
+    '',
+    '이 메일이 받은편지함 또는 스팸/프로모션 폴더에 보인다면,',
+    '일일 브리핑 발송도 동일 경로로 도착합니다.',
+    '',
+    '— Morning Stock AI Briefing Center',
+  ].join('\n')
+
+  const htmlBody = `
+    <!DOCTYPE html><html lang="ko"><body style="font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;color:#222;max-width:560px;margin:0 auto;padding:24px;">
+      <div style="background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;padding:20px 24px;border-radius:12px 12px 0 0;">
+        <div style="font-size:12px;opacity:.85;letter-spacing:1px;">MORNING STOCK AI · TEST MAIL</div>
+        <div style="font-size:20px;font-weight:700;margin-top:4px;">📬 수신 테스트 메일</div>
+      </div>
+      <div style="background:#fff;padding:24px;border:1px solid #eee;border-top:none;border-radius:0 0 12px 12px;line-height:1.7;">
+        <p>안녕하세요,</p>
+        <p>이 메일은 <strong>Morning Stock AI Briefing Center</strong> 의 수신 테스트 메일입니다.</p>
+        <p>관리 UI 로부터 <strong>${now.toLocaleString('ko-KR')}</strong> 에 발송되었습니다.</p>
+        <p style="color:#666;font-size:14px;">이 메일이 받은편지함 또는 스팸/프로모션 폴더에 보인다면,
+        일일 브리핑 발송도 동일 경로로 도착합니다.</p>
+        <div style="margin-top:20px;padding:12px;background:#f0f9ff;border-left:4px solid #0ea5e9;font-size:13px;color:#075985;">
+          💡 <strong>네이버 메일 사용자 팁</strong>: 이 메일이 스팸으로 분류되면
+          '이 메일을 스팸이 아님으로 설정' 을 클릭하고, <code>${sender}</code> 를
+          <strong>주소록/안전 발신인</strong> 에 등록해 주세요.
+        </div>
+      </div>
+    </body></html>`
+
+  // MailChannels API 호출
+  const payload = {
+    personalizations: [{ to: [{ email: target }] }],
+    from: { email: sender, name: 'Morning Stock AI' },
+    reply_to: { email: sender, name: 'Morning Stock AI' },
+    subject,
+    content: [
+      { type: 'text/plain', value: textBody },
+      { type: 'text/html', value: htmlBody },
+    ],
+    headers: {
+      'List-Unsubscribe': `<mailto:${sender}?subject=unsubscribe>`,
+      'X-Mailer': 'MorningStockAI-BriefingCenter/2.2.5-CF',
+    },
+  }
+
+  try {
+    const resp = await fetch('https://api.mailchannels.net/tx/v1/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    const respText = await resp.text()
+    if (!resp.ok) {
+      return c.json({
+        ok: false,
+        via: 'mailchannels',
+        error: `MailChannels HTTP ${resp.status}: ${respText.slice(0, 500)}`,
+        hint: resp.status === 401 || resp.status === 403
+          ? 'MailChannels 는 custom domain 을 요구할 수 있습니다. 대안으로 GitHub Actions 경로(SMTP)만 사용하세요.'
+          : 'MailChannels API 가 응답하지 않음. GitHub Actions 를 통해 재시도하세요.',
+      }, 502)
+    }
+
+    return c.json({
+      ok: true,
+      via: 'mailchannels',
+      target,
+      message: `✅ MailChannels 경유 테스트 메일 발송됨 → ${target} (받은편지함/스팸 폴더 확인)`,
+      sentAt: now.toISOString(),
+    })
+  } catch (e: any) {
+    return c.json({
+      ok: false,
+      via: 'mailchannels',
+      error: `네트워크 오류: ${e?.message ?? String(e)}`,
+    }, 500)
+  }
 })
 
 /** 실제 워크플로 트리거 */
@@ -1066,7 +1266,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2.4' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2.5' })
 )
 
 export default app
