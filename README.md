@@ -1,7 +1,17 @@
-# 🌅 Morning Stock AI — Briefing Center
+# 🌅 Morning Stock AI — Briefing Center **v2.0** 🎯
 
 > **매일 아침 7시(KST)**, 주식·반도체 뉴스를 AI가 엄선·한국어 요약해 내 Gmail로 배달하는 **개인 브리핑 자동화 시스템**.
 > 추가로, 새로운 뉴스지/애널리스트 RSS/YouTube 채널을 **웹 관리 콘솔**에서 자유롭게 등록할 수 있습니다.
+
+## 🆕 v2.0 업데이트 (2026-04-21)
+- 🎯 **검색어 기반 정밀 수집**: 각 소스마다 최대 5개 검색어 지정 가능 (`site:hankyung.com "반도체"` 형태)
+- 📋 **프리셋 4종**: 🇰🇷 한국 증권 / 🇰🇷 한국 IT / 🌎 US Semi / 🌎 US ETF — 클릭 한 번에 적용
+- 🗂️ **카테고리 탭 UI**: 🇰🇷 한국 / 🌎 미국 / 📺 유튜브 / ➕ 사용자 — 필터·편집·테스트·on/off
+- 🌱 **자동 시드**: 최초 접속 시 기본 13개 소스 + 추천 검색어 자동 주입
+- 🔌 **KV 중심 수집**: 한국·미국 뉴스도 코드가 아닌 관리 콘솔에서 전부 편집 (하드코딩 폴백은 안전망)
+- 📈 **수집량 2.5배**: 48건 → **111건** (123건 수집 후 중복 제거)
+
+→ 언제든 관리 UI (https://morning-stock-briefing.pages.dev) → 편집 ✏️ → 프리셋 적용 또는 자유 편집
 
 ## 🚀 Live Deployment
 - **관리 콘솔**: https://morning-stock-briefing.pages.dev

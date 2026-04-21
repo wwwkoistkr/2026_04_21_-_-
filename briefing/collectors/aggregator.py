@@ -1,8 +1,14 @@
 """
-[2단계] 수집기 통합 함수 (collect_all_data).
+[2단계 v2] 수집기 통합 함수 (collect_all_data) — KV 중심 우선.
 
-지침서 3.2의 예외 처리 원칙에 따라, 하위 수집기 중 어떤 것이 실패해도
-나머지 수집은 계속 진행되도록 각 호출을 try-except 로 감쌉니다.
+## 동작 흐름
+1) 먼저 Cloudflare KV (관리 UI) 에서 활성 소스 목록을 가져와 수집
+   → 이게 기본 경로입니다. 한국/미국/유튜브/사용자 소스가 모두 KV 에 저장돼 있기 때문.
+2) KV 수집 결과가 0건이면 (BRIEFING_ADMIN_API 미설정/네트워크 실패 등)
+   기존 하드코딩 수집기로 폴백 (한국 3사, 미국 매체, 디일렉 유튜브)
+3) 두 경로 모두 실패해도 각 try/except 가 독립적이라 서비스 중단 없음.
+
+지침서 3.2 예외 처리 원칙 유지.
 """
 from __future__ import annotations
 
@@ -24,51 +30,65 @@ def collect_all_data(
     custom_limit: int = 3,
 ) -> List[Dict[str, str]]:
     """
-    모든 소스(한국 3사, 미국 매체, 디일렉 유튜브, 사용자 등록 커스텀 소스)에서
-    수집 후 단일 리스트로 반환.
+    활성화된 모든 소스에서 수집 후 단일 리스트로 반환.
 
-    반환 스키마는 항상 지침서 3.3 표준 양식:
+    **우선 전략 (v2)**
+    - 1순위: Cloudflare KV (관리 UI v2 스키마, queries 포함)
+    - 2순위: KV 에서 0건 반환시 하드코딩 폴백 (한국/미국/유튜브)
+
+    반환 스키마는 항상 지침서 §3.3 표준 양식:
       {source, title, link, summary}
     """
     all_news: List[Dict[str, str]] = []
 
-    # 1) 한국 경제 3사 (증권/IT)
+    # ── 1) KV 중심 수집 (v2) ────────────────────────────────
+    print("\n╔══════════════════════════════════════════════════════╗")
+    print("║  📡 KV 소스 수집 (관리 UI v2 스키마)                  ║")
+    print("╚══════════════════════════════════════════════════════╝")
+    kv_news: List[Dict[str, str]] = []
     try:
-        k = collect_korean_news(per_feed_limit=korean_limit)
-        all_news.extend(k)
-        print(f"📰 한국 뉴스 누적: {len(k)}건")
+        kv_news = collect_custom_sources(per_source_limit=custom_limit)
+        print(f"\n🧩 KV 기반 수집 누적: {len(kv_news)}건")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("한국 뉴스 수집 전체 실패: %s", exc)
-        print(f"❌ 한국 뉴스 수집 전체 실패 (건너뜀): {exc}")
+        logger.warning("KV 수집 전체 실패: %s", exc)
+        print(f"❌ KV 수집 전체 실패 (폴백 모드 진입): {exc}")
 
-    # 2) 미국 반도체/ETF 매체
-    try:
-        u = get_us_news(per_feed_limit=us_limit)
-        all_news.extend(u)
-        print(f"🌎 미국 뉴스 누적: {len(u)}건")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("미국 뉴스 수집 전체 실패: %s", exc)
-        print(f"❌ 미국 뉴스 수집 전체 실패 (건너뜀): {exc}")
+    all_news.extend(kv_news)
 
-    # 3) 디일렉 유튜브 (내장)
-    try:
-        y = get_youtube_news(max_results=youtube_limit)
-        all_news.extend(y)
-        print(f"📺 유튜브 누적: {len(y)}건")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("유튜브 수집 전체 실패: %s", exc)
-        print(f"❌ 유튜브 수집 전체 실패 (건너뜀): {exc}")
+    # ── 2) KV 실패/비어있음 → 하드코딩 폴백 ─────────────────
+    if len(kv_news) == 0:
+        print("\n╔══════════════════════════════════════════════════════╗")
+        print("║  ⚠️  KV 수집 실패/0건 → 하드코딩 폴백 수집            ║")
+        print("╚══════════════════════════════════════════════════════╝")
 
-    # 4) 사용자 등록 커스텀 소스 (Morning Stock AI 관리 UI 로부터)
-    try:
-        c = collect_custom_sources(per_source_limit=custom_limit)
-        all_news.extend(c)
-        print(f"🧩 사용자 등록 소스 누적: {len(c)}건")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("커스텀 소스 수집 전체 실패: %s", exc)
-        print(f"❌ 커스텀 소스 수집 전체 실패 (건너뜀): {exc}")
+        # 2-1) 한국 경제 3사 (증권/IT)
+        try:
+            k = collect_korean_news(per_feed_limit=korean_limit)
+            all_news.extend(k)
+            print(f"📰 (폴백) 한국 뉴스: {len(k)}건")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("폴백 한국 뉴스 실패: %s", exc)
+            print(f"❌ (폴백) 한국 뉴스 실패: {exc}")
 
-    # 중복 제거 (동일 링크 기준)
+        # 2-2) 미국 반도체/ETF 매체
+        try:
+            u = get_us_news(per_feed_limit=us_limit)
+            all_news.extend(u)
+            print(f"🌎 (폴백) 미국 뉴스: {len(u)}건")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("폴백 미국 뉴스 실패: %s", exc)
+            print(f"❌ (폴백) 미국 뉴스 실패: {exc}")
+
+        # 2-3) 디일렉 유튜브
+        try:
+            y = get_youtube_news(max_results=youtube_limit)
+            all_news.extend(y)
+            print(f"📺 (폴백) 유튜브: {len(y)}건")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("폴백 유튜브 실패: %s", exc)
+            print(f"❌ (폴백) 유튜브 실패: {exc}")
+
+    # ── 3) 중복 제거 (동일 링크 기준) ─────────────────────
     deduped: List[Dict[str, str]] = []
     seen_links = set()
     for item in all_news:
@@ -91,7 +111,7 @@ if __name__ == "__main__":
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     print("=" * 60)
-    print("통합 수집 테스트")
+    print("통합 수집 테스트 (v2, KV 우선)")
     print("=" * 60)
 
     data = collect_all_data()
