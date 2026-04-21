@@ -1,13 +1,14 @@
 /**
- * Morning Stock AI — Service Worker v2.1
+ * Morning Stock AI — Service Worker v2.2
  * ─────────────────────────────────────
  * - App shell cache (정적 파일)
+ * - admin.js: 네트워크 우선 (최신 코드 강제 적용)
  * - API 요청: 네트워크 우선, 실패 시 캐시
  * - 로그인 만료 시 자동 리다이렉트
+ * - 버전 업데이트 시 기존 캐시 자동 삭제 + 클라이언트 즉시 새로고침
  */
-const CACHE_VERSION = 'msaic-v2.1.0'
+const CACHE_VERSION = 'msaic-v2.2.0'
 const APP_SHELL = [
-  '/static/admin.js',
   '/static/style.css',
   '/static/manifest.json',
   '/static/icons/icon-192.png',
@@ -15,22 +16,36 @@ const APP_SHELL = [
   '/static/icons/apple-touch-icon.png',
 ]
 
+// ★ 네트워크 우선으로 가져올 파일 (자주 변경되는 JS) — 캐시 stale 문제 방지
+const NETWORK_FIRST_PATHS = [
+  '/static/admin.js',
+]
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_VERSION).then((cache) => cache.addAll(APP_SHELL)).catch(() => {})
   )
+  // 즉시 활성화 → 기존 탭도 빨리 새 SW 사용
   self.skipWaiting()
 })
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
+    (async () => {
+      // 기존 캐시 모두 삭제
+      const keys = await caches.keys()
+      await Promise.all(
         keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k))
       )
-    )
+      // 모든 클라이언트 즉시 장악
+      await self.clients.claim()
+      // 활성 클라이언트에 리로드 신호 전송 (선택적)
+      const clients = await self.clients.matchAll({ type: 'window' })
+      for (const client of clients) {
+        client.postMessage({ type: 'SW_UPDATED', version: CACHE_VERSION })
+      }
+    })()
   )
-  self.clients.claim()
 })
 
 self.addEventListener('fetch', (event) => {
@@ -49,7 +64,23 @@ self.addEventListener('fetch', (event) => {
     return // 기본 네트워크 동작
   }
 
-  // 정적 파일: stale-while-revalidate
+  // ★ 네트워크 우선 파일 (admin.js 등) - 네트워크 실패 시에만 캐시
+  if (NETWORK_FIRST_PATHS.some((p) => url.pathname === p)) {
+    event.respondWith(
+      fetch(request)
+        .then((resp) => {
+          if (resp && resp.ok) {
+            const respClone = resp.clone()
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, respClone))
+          }
+          return resp
+        })
+        .catch(() => caches.match(request).then((c) => c || new Response('offline', { status: 503 })))
+    )
+    return
+  }
+
+  // 정적 파일: stale-while-revalidate (이미지, CSS, manifest 등)
   if (url.pathname.startsWith('/static/')) {
     event.respondWith(
       caches.open(CACHE_VERSION).then((cache) =>

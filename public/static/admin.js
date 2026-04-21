@@ -1,12 +1,15 @@
 /**
- * Morning Stock AI — Admin Dashboard Client Script v2
- * ───────────────────────────────────────────────────
+ * Morning Stock AI — Admin Dashboard Client Script v2.2.1
+ * ───────────────────────────────────────────────────────
  * - 카테고리 탭 (🇰🇷/🌎/📺/➕/전체)
  * - 소스 카드: 검색어 태그 표시, 편집/테스트/삭제 버튼
  * - 편집 모달: label/url/site/queries/defaultLimit 편집 + 프리셋 적용 버튼
  * - 새 소스 추가: 모달 재사용
  * - 기본값 복원
  * - 토스트 알림
+ * - PC↔모바일 실시간 동기화 (BroadcastChannel + 폴링)
+ * - 글로벌 에러 핸들러로 사용자에게 친절한 에러 표시
+ * BUILD: 2026-04-21 v2.2.1
  */
 
 (function () {

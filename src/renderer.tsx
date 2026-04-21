@@ -97,27 +97,56 @@ export const renderer = jsxRenderer(({ children, title }: any) => {
       <body class="bg-slate-50 min-h-screen text-gray-800 antialiased">
         {children}
 
-        {/* Service Worker 등록 + 사전 업데이트 감지 */}
+        {/* Service Worker 등록 + 자동 업데이트 + SW 갱신 시 즉시 새로고침 */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
               if ('serviceWorker' in navigator) {
                 window.addEventListener('load', () => {
                   navigator.serviceWorker.register('/static/sw.js').then((reg) => {
-                    // 새 버전 감지 시 자동 갱신
+                    // 페이지 로드 시 강제 업데이트 확인
+                    reg.update().catch(() => {});
+
+                    // 새 버전 감지 시 자동 활성화
                     reg.addEventListener('updatefound', () => {
                       const nw = reg.installing;
                       if (nw) {
                         nw.addEventListener('statechange', () => {
                           if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-                            console.log('[SW] 새 버전 준비 완료');
+                            console.log('[SW] 새 버전 준비 완료 - 자동 새로고침');
+                            // 사용자 작업 방해 최소화: 3초 후 새로고침
+                            setTimeout(() => window.location.reload(), 3000);
                           }
                         });
                       }
                     });
                   }).catch((e) => console.warn('[SW] 등록 실패:', e));
+
+                  // SW가 업데이트 메시지 보내면 즉시 새로고침
+                  navigator.serviceWorker.addEventListener('message', (e) => {
+                    if (e.data && e.data.type === 'SW_UPDATED') {
+                      console.log('[SW] 업데이트 감지:', e.data.version);
+                    }
+                  });
+
+                  // Controller 바뀌면 (새 SW 활성화) 한 번만 새로고침
+                  let reloaded = false;
+                  navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (reloaded) return;
+                    reloaded = true;
+                    console.log('[SW] Controller 교체 - 새로고침');
+                    window.location.reload();
+                  });
                 });
               }
+
+              // 전역 에러 핸들러: 런타임 오류를 사용자에게 알림
+              window.addEventListener('error', (e) => {
+                console.error('[Global Error]', e.message, e.filename, e.lineno);
+              });
+              window.addEventListener('unhandledrejection', (e) => {
+                console.error('[Unhandled Promise]', e.reason);
+              });
             `,
           }}
         />

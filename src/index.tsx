@@ -382,7 +382,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.2
+                Daily Briefing Admin v2.2.1
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -552,7 +552,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2.1</span></p>
         <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -608,7 +608,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js"></script>
+      <script src="/static/admin.js?v=2.2.1"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )
@@ -1050,7 +1050,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2.1' })
 )
 
 export default app
