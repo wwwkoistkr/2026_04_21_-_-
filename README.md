@@ -1,15 +1,29 @@
-# 🌅 Morning Stock AI — Briefing Center **v2.1** 📱🚀
+# 🌅 Morning Stock AI — Briefing Center **v2.2** 🔄📱🚀
 
 > **매일 아침 7시(KST)**, 주식·반도체 뉴스를 AI가 엄선·한국어 요약해 내 Gmail로 배달하는 **개인 브리핑 자동화 시스템**.
 > 추가로, 새로운 뉴스지/애널리스트 RSS/YouTube 채널을 **웹 관리 콘솔**에서 자유롭게 등록할 수 있습니다.
 
-## 🆕 v2.1 업데이트 (2026-04-21) — PWA + "지금 발송" 버튼
-- 📱 **PWA 지원**: iOS/Android 홈 화면에 앱처럼 설치 가능 (🌅 아이콘, 오프라인 캐시, 상태바 컬러)
-- 🚀 **"지금 발송" 버튼**: 07:00 스케줄과 별도로 즉시 수집·요약·발송 (GitHub Actions `workflow_dispatch` 호출)
-- 🧪 **DRY RUN 모드**: 메일은 보내지 않고 미리보기만 생성해 artifact로 확인
-- ⏳ **10분 쿨다운**: 연속 호출 방지 (KV 기반)
-- 🔄 **상태 폴링**: 버튼 클릭 후 `in_progress` → `completed` 상태 실시간 표시 (10초 간격)
-- 📱 **반응형 UI**: 44px 터치 타겟, iOS safe-area, 16px 입력창 (줌 방지), 풀스크린 모달
+## 🆕 v2.2 업데이트 (2026-04-21) — 에러 수정 + 8K 고해상도 + PC↔모바일 실시간 동기화
+- 🛡️ **에러 내성 강화**: 전역 에러 핸들러 (`window.onerror`, `unhandledrejection`) + null-safe 가드 + `safeFetch` 래퍼로 모든 API 오류가 사용자에게 토스트로 표시됨
+- 🖼️ **8K 고해상도 아이콘 세트**: 16/32/48/64/72/96/128/144/152/167/180/192/256/384/512/1024/**2048**px + maskable 세트 → Retina/4K/8K 디스플레이에서도 선명
+- 🔄 **PC ↔ 모바일 실시간 동기화** (새 기능!)
+  - 같은 브라우저 탭 간: **BroadcastChannel** 즉시 반영
+  - 서로 다른 기기 간: **`/api/admin/sync-version`** 15초 폴링 → 데이터 변경 시 자동 갱신
+  - KV 기반 버전 카운터 (sources/recipients 변경시 +1)
+  - 편집 모달 열려있을 땐 자동갱신 지연 (작업 보호)
+- 📐 **해상도별 반응형 레이아웃**:
+  - 1920px+: 소스 카드 2단 그리드
+  - 2560px (QHD): 3단 그리드 + 폰트 크기 확대
+  - 3840px (4K/8K): 4단 그리드 + 터치 영역 확대
+  - Retina 대응: 0.5px 테두리, geometricPrecision 렌더링
+- 🌗 **자동 테마 색상**: light/dark 모드에 따라 theme-color 전환
+- 🖨️ **프린트 최적화**: PDF/인쇄 시 버튼/모달 자동 숨김
+
+## v2.1 기능 (유지)
+- 📱 **PWA 지원**: iOS/Android 홈 화면 설치 (🌅 아이콘, 오프라인 캐시)
+- 🚀 **"지금 발송" 버튼**: GitHub Actions workflow_dispatch 즉시 실행
+- 🧪 **DRY RUN 모드**: 메일 미발송 + artifact 미리보기
+- ⏳ **10분 쿨다운** + 상태 폴링
 
 ## v2.0 기능 (유지)
 - 🎯 **검색어 기반 정밀 수집**: 각 소스마다 최대 5개 검색어 지정 (`site:hankyung.com "반도체"` 형태)
