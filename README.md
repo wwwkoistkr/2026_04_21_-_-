@@ -1,13 +1,19 @@
 # 🌅 Morning Stock AI — Briefing Center
 
-> **매일 아침 8시(KST)**, 주식·반도체 뉴스를 AI가 엄선·한국어 요약해 내 Gmail로 배달하는 **개인 브리핑 자동화 시스템**.
+> **매일 아침 7시(KST)**, 주식·반도체 뉴스를 AI가 엄선·한국어 요약해 내 Gmail로 배달하는 **개인 브리핑 자동화 시스템**.
 > 추가로, 새로운 뉴스지/애널리스트 RSS/YouTube 채널을 **웹 관리 콘솔**에서 자유롭게 등록할 수 있습니다.
+
+## 🚀 Live Deployment
+- **관리 콘솔**: https://morning-stock-briefing.pages.dev
+- **로그인**: 비밀번호 `admin1234`
+- **기본 수신자**: `wwwkoistkr@gmail.com` (자동 등록됨)
+- **스케줄**: 매일 **07:00 KST** 자동 발송 (GitHub Actions cron)
 
 ---
 
 ## 🎯 빠른 시작: **👉 [SETUP_GUIDE.md](./SETUP_GUIDE.md) 를 먼저 읽으세요!**
 
-> 내일 아침 08:00 부터 `wwwkoistkr@gmail.com` 으로 브리핑을 받기 위한
+> 내일 아침 07:00 부터 `wwwkoistkr@gmail.com` 으로 브리핑을 받기 위한
 > **단계별 체크리스트**(약 10분)가 정리되어 있습니다.
 
 ---
@@ -18,7 +24,7 @@
 
 | # | 구성요소 | 스택 | 역할 |
 |:--:|---|---|---|
-| ① | **Python 브리핑 파이프라인** | Python 3.11 + GitHub Actions | 매일 아침 8시 자동 실행 → 수집 · Gemini 요약 · Gmail 발송 |
+| ① | **Python 브리핑 파이프라인** | Python 3.11 + GitHub Actions | 매일 아침 7시 자동 실행 → 수집 · Gemini 요약 · Gmail 발송 |
 | ② | **관리자 웹 콘솔** | Hono · Cloudflare Pages · KV | 새 뉴스지/애널리스트 소스를 추가/삭제 · 로그인 보호 |
 
 ```
@@ -56,7 +62,7 @@
 | 포맷 | `briefing/modules/formatter.py` | 수집 dict → Gemini 프롬프트 텍스트 |
 | 요약 | `briefing/modules/ai_summarizer.py` | **Gemini 2.5 Flash** — 핵심 10개 + 해외 뉴스 한국어 번역 |
 | 발송 | `briefing/modules/email_sender.py` | Markdown → 브랜드 HTML → Gmail SMTP |
-| 자동화 | `.github/workflows/daily_briefing.yml` | 매일 **KST 08:00** 실행 + 수동 dry_run |
+| 자동화 | `.github/workflows/daily_briefing.yml` | 매일 **KST 07:00** 실행 + 수동 dry_run |
 
 ### ② Hono 웹 관리 콘솔
 
@@ -176,7 +182,7 @@ webapp/
 ├── public/static/
 │   ├── admin.js                        # 대시보드 프런트 스크립트
 │   └── style.css                       # 커스텀 CSS
-├── .github/workflows/daily_briefing.yml # 매일 08:00 KST
+├── .github/workflows/daily_briefing.yml # 매일 07:00 KST
 ├── ecosystem.config.cjs                # PM2 (로컬 Hono 실행)
 ├── wrangler.jsonc                      # Cloudflare Pages 설정 + KV 바인딩
 ├── vite.config.ts                      # Hono Cloudflare Pages 빌드
@@ -210,7 +216,7 @@ npx wrangler pages deploy dist --project-name morning-stock-briefing
 
 1. GitHub 저장소에 코드 푸시
 2. `Settings → Secrets and variables → Actions` 에서 위 표의 Secrets 등록
-3. 내일 아침 **KST 08:00** 부터 자동 발송 시작 (또는 `Run workflow` 버튼으로 수동 실행)
+3. 내일 아침 **KST 07:00** 부터 자동 발송 시작 (또는 `Run workflow` 버튼으로 수동 실행)
 
 ---
 
@@ -244,7 +250,7 @@ npx wrangler pages deploy dist --project-name morning-stock-briefing
    - **URL**: `https://analyst.example.com/rss` 혹은 유튜브 채널 URL
 4. 🧪 **테스트** 버튼으로 실제 수집 가능 여부 확인
 5. ✅ **추가** 버튼 → 즉시 저장 (다음 날 아침 브리핑부터 반영)
-6. 매일 08:00 KST, `wwwkoistkr@gmail.com` 으로 브리핑 도착 ✉️
+6. 매일 07:00 KST, `wwwkoistkr@gmail.com` 으로 브리핑 도착 ✉️
 
 ---
 

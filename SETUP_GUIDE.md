@@ -1,6 +1,6 @@
 # 🎯 Morning Stock AI Briefing Center — 운영 설정 가이드
 
-> **목표**: 매일 아침 **08:00 KST** 에 `wwwkoistkr@gmail.com` 으로 주식·반도체 브리핑 메일이 **자동 도착** 하도록 설정합니다.
+> **목표**: 매일 아침 **07:00 KST** 에 `wwwkoistkr@gmail.com` 으로 주식·반도체 브리핑 메일이 **자동 도착** 하도록 설정합니다.
 
 이 가이드는 **사용자가 직접 해야 하는 작업만** 정리한 체크리스트입니다.
 모든 항목은 약 **10~15분** 안에 끝낼 수 있습니다.
@@ -80,7 +80,7 @@
 | 3 | `EMAIL_APP_PASSWORD` | 위 1단계의 **16자리** (공백 제거) |
 | 4 | `EMAIL_RECIPIENTS` | `wwwkoistkr@gmail.com` |
 
-> ✅ 위 4개만 등록하면 **매일 아침 08:00 KST** 브리핑이 자동 발송됩니다.
+> ✅ 위 4개만 등록하면 **매일 아침 07:00 KST** 브리핑이 자동 발송됩니다.
 
 ### (선택) 추가 Secrets
 
@@ -100,7 +100,7 @@
 4. ~2분 후 실행 완료 → **초록색 체크** 확인
 5. `wwwkoistkr@gmail.com` 메일함에서 **📊 일일 주식·반도체 브리핑** 이 도착했는지 확인 ✉️
 
-> 🎉 **여기까지 되면 완료!** 내일 아침 08:00 부터 자동으로 도착합니다.
+> 🎉 **여기까지 되면 완료!** 내일 아침 07:00 부터 자동으로 도착합니다.
 
 ---
 
@@ -152,7 +152,7 @@ npx wrangler pages deploy dist --project-name morning-stock-briefing
 ## ❓ 자주 묻는 질문
 
 **Q. 매일 몇 시에 메일이 오나요?**
-A. **매일 아침 08:00 KST** (한국시간). GitHub Actions 가 자동으로 실행합니다.
+A. **매일 아침 07:00 KST** (한국시간). GitHub Actions 가 자동으로 실행합니다.
 
 **Q. 메일이 안 왔어요.**
 A. Actions 탭에서 로그를 확인하세요. 빨간색 실패 표시가 있으면:
@@ -165,7 +165,7 @@ A. GitHub Actions (월 2000분 무료) + Gemini 2.5 Flash (일 1500회 무료) +
 → **완전 무료** 로 운영 가능합니다.
 
 **Q. 시간을 바꾸고 싶어요.**
-A. `.github/workflows/daily_briefing.yml` 의 `cron: '0 23 * * *'` 부분 (UTC 23:00 = KST 08:00).
+A. `.github/workflows/daily_briefing.yml` 의 `cron: `0 22 * * *'` 부분 (UTC 23:00 = KST 08:00).
 예) KST 07:00 을 원하면 `cron: '0 22 * * *'` 로 변경.
 
 **Q. 받는 사람을 여러 명으로 하고 싶어요.**

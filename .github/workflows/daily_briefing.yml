@@ -2,8 +2,8 @@ name: Morning Stock AI — Daily Briefing
 
 on:
   schedule:
-    # 매일 한국시간 오전 8:00 (= UTC 23:00 전날)
-    - cron: '0 23 * * *'
+    # 매일 한국시간 오전 7:00 (= UTC 22:00 전날)
+    - cron: '0 22 * * *'
   # 수동 실행 버튼
   workflow_dispatch:
     inputs:

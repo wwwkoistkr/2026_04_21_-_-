@@ -13,7 +13,7 @@
   "kv_namespaces": [
     {
       "binding": "SOURCES_KV",
-      "id": "local-placeholder-will-be-replaced-in-production"
+      "id": "058fd3613bb34ef08d5aa3d1bbf306cc"
     }
   ]
   // 로그인 비밀번호 / 브리핑 API 토큰은 wrangler secret 로 저장:

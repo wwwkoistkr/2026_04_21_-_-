@@ -1,8 +1,10 @@
 """
-[3단계] Gemini 2.5 Flash 를 활용한 핵심 10개 뉴스 요약 모듈.
+[3단계] Gemini 2.5 Flash (주) + OpenAI 호환 엔드포인트 (보조) 를 활용한
+핵심 10개 뉴스 요약 모듈.
 
-- 환경변수 ``GEMINI_API_KEY`` 필수
-- 라이브러리: ``google-generativeai`` (pip install google-generativeai)
+- 주 엔진: Google Gemini 2.5 Flash (``GEMINI_API_KEY`` 환경변수)
+- 보조 엔진: OpenAI 호환 API (``OPENAI_API_KEY`` + ``OPENAI_BASE_URL``)
+  → Gemini 키가 없거나 실패할 때 자동 fallback
 - 해외 뉴스는 반드시 한국어로 번역한다는 지시를 프롬프트에 명시
 - 반환값은 HTML/Markdown 혼합 가능한 순수 텍스트 (메일 본문 생성기가 포맷함)
 """
@@ -45,53 +47,84 @@ SYSTEM_PROMPT = """당신은 한국 개인투자자를 위한 '주식 및 반도
 """
 
 
+def _summarize_with_openai_compat(
+    briefing_input_text: str,
+    model_name: str = "gpt-5-mini",
+) -> str:
+    """
+    OpenAI 호환 API(Chat Completions) 로 요약 — Gemini 실패/미설정 시 fallback.
+    환경변수 ``OPENAI_API_KEY``, ``OPENAI_BASE_URL`` 필요.
+    """
+    from openai import OpenAI  # lazy import
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("OPENAI_BASE_URL")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY 환경변수가 필요합니다.")
+
+    client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
+    logger.info("OpenAI 호환 호출: model=%s, base_url=%s", model_name, base_url or "(default)")
+
+    resp = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": briefing_input_text},
+        ],
+    )
+    text = (resp.choices[0].message.content or "").strip()
+    if not text:
+        raise RuntimeError("OpenAI 호환 응답이 비어 있습니다.")
+    return text
+
+
 def summarize_with_gemini(
     briefing_input_text: str,
     model_name: str = "gemini-2.5-flash",
     api_key: Optional[str] = None,
 ) -> str:
     """
-    Gemini 에 수집 뉴스를 보내고 10개 핵심 브리핑(마크다운)을 반환.
-
-    Parameters
-    ----------
-    briefing_input_text : str
-        format_data_for_ai() 로 가공된 텍스트.
-    model_name : str
-        기본 ``gemini-2.5-flash`` (설계서 [3단계] 2번 준수).
-    api_key : str, optional
-        미지정 시 ``GEMINI_API_KEY`` env 사용.
+    뉴스 요약을 수행. 우선순위:
+      1) GEMINI_API_KEY 가 있으면 Gemini 2.5 Flash 사용
+      2) 실패/미설정 시 OpenAI 호환 API 로 자동 fallback
+         (환경변수 OPENAI_API_KEY / OPENAI_BASE_URL 필요)
+    둘 다 없으면 RuntimeError.
     """
     key = api_key or os.getenv("GEMINI_API_KEY")
-    if not key:
-        raise RuntimeError(
-            "GEMINI_API_KEY 환경변수가 설정되어 있지 않습니다. "
-            "GitHub Secrets 또는 .env 에 추가해 주세요."
-        )
 
-    # 지연 import — google-generativeai 미설치 시에도 다른 모듈 import 가능
-    import google.generativeai as genai
+    # ---- Gemini 우선 시도 ----
+    if key:
+        try:
+            import google.generativeai as genai
 
-    genai.configure(api_key=key)
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                generation_config={
+                    "temperature": 0.4,
+                    "top_p": 0.9,
+                    "max_output_tokens": 4096,
+                },
+            )
+            full_prompt = SYSTEM_PROMPT + "\n" + briefing_input_text
+            logger.info("Gemini 호출: model=%s, 입력 길이=%d", model_name, len(full_prompt))
+            response = model.generate_content(full_prompt)
+            text = (response.text or "").strip()
+            if text:
+                return text
+            logger.warning("Gemini 응답이 비어 있음 — OpenAI 호환으로 fallback")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Gemini 호출 실패, OpenAI 호환으로 fallback: %s", exc)
 
-    model = genai.GenerativeModel(
-        model_name=model_name,
-        generation_config={
-            "temperature": 0.4,
-            "top_p": 0.9,
-            "max_output_tokens": 4096,
-        },
+    # ---- OpenAI 호환 fallback ----
+    if os.getenv("OPENAI_API_KEY"):
+        openai_model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+        return _summarize_with_openai_compat(briefing_input_text, model_name=openai_model)
+
+    raise RuntimeError(
+        "AI 요약 엔진 설정이 없습니다. "
+        "GEMINI_API_KEY 또는 (OPENAI_API_KEY + OPENAI_BASE_URL) 중 하나가 필요합니다."
     )
-
-    full_prompt = SYSTEM_PROMPT + "\n" + briefing_input_text
-
-    logger.info("Gemini 호출: model=%s, 입력 길이=%d", model_name, len(full_prompt))
-    response = model.generate_content(full_prompt)
-
-    text = (response.text or "").strip()
-    if not text:
-        raise RuntimeError("Gemini 응답이 비어 있습니다.")
-    return text
 
 
 # ---------------------------------------------------------------------------
