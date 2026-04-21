@@ -382,6 +382,9 @@ def send_email(
 
     logger.info("메일 발송 완료: %d/%d 수락, %d 거부", len(accepted), len(recipients), len(rejected_report))
 
+    # (v2.2.7) 발송 이력을 Hono Worker 에 POST — 관리 UI 에서 수신자별 "마지막 발송 시간" 표시용
+    _report_recipient_events(accepted, rejected_report)
+
     # 모두 거부된 경우에만 예외
     if not accepted:
         raise RuntimeError(
@@ -391,6 +394,43 @@ def send_email(
 
     print("   💡 메일이 안 보이면 스팸/프로모션 폴더를 확인해 주세요.")
     print("   💡 네이버 메일 사용자: '이 메일을 스팸이 아님으로 설정' + 발신자를 '안전 발신인' 에 등록")
+
+
+def _report_recipient_events(accepted: List[str], rejected: List[dict]) -> None:
+    """
+    (v2.2.7) Hono Worker 에 발송 이벤트 POST — 관리 UI 수신자 카드에
+    '마지막 발송 일시' / '누적 성공/실패 횟수' / '최근 실패 사유' 를 표시하기 위함.
+    네트워크 장애·토큰 오류로 실패해도 파이프라인은 영향 없이 계속 진행.
+    """
+    admin_api = os.getenv("BRIEFING_ADMIN_API")
+    read_token = os.getenv("BRIEFING_READ_TOKEN")
+    if not admin_api:
+        return
+    now_iso = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    events = [{"email": e, "success": True, "sentAt": now_iso} for e in accepted]
+    for item in rejected:
+        events.append({
+            "email": item.get("recipient"),
+            "success": False,
+            "reason": f"SMTP {item.get('code')}: {item.get('reason', '')}"[:200],
+            "sentAt": now_iso,
+        })
+    if not events:
+        return
+    url = admin_api.rstrip("/") + "/api/public/recipient-events"
+    headers = {"Content-Type": "application/json"}
+    if read_token:
+        headers["Authorization"] = f"Bearer {read_token}"
+    try:
+        resp = requests.post(url, headers=headers, json={"events": events}, timeout=5)
+        if resp.ok:
+            data = resp.json()
+            logger.info("발송 이벤트 리포트: %d건 업데이트", data.get("updated", 0))
+            print(f"   📊 발송 이력 기록됨: {data.get('updated', 0)}건 (관리 UI 에서 확인)")
+        else:
+            logger.warning("발송 이벤트 리포트 실패 HTTP %s", resp.status_code)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("발송 이벤트 리포트 네트워크 오류: %s", exc)
 
 
 def _mask_email(email: str) -> str:

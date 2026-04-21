@@ -1,5 +1,5 @@
 /**
- * Morning Stock AI — Admin Dashboard Client Script v2.2.6
+ * Morning Stock AI — Admin Dashboard Client Script v2.2.7
  * ───────────────────────────────────────────────────────
  * - 카테고리 탭 (🇰🇷/🌎/📺/➕/전체)
  * - 소스 카드: 검색어 태그 표시, 편집/테스트/삭제 버튼
@@ -9,8 +9,8 @@
  * - 토스트 알림
  * - PC↔모바일 실시간 동기화 (BroadcastChannel + 폴링)
  * - 글로벌 에러 핸들러로 사용자에게 친절한 에러 표시
- * BUILD: 2026-04-21 v2.2.6
- * [v2.2.6] 🔴 CRITICAL FIX: 이메일 '발송완료' 오보고 + 로그인화면 복원
+ * BUILD: 2026-04-21 v2.2.7
+ * [v2.2.7] 🔴 CRITICAL FIX: 이메일 '발송완료' 오보고 + 로그인화면 복원
  *   - Python email_sender: sendmail() 거부 수신자 dict 검사 → 일부 실패도 감지
  *   - Gmail 스팸 분류 낮추는 헤더 추가 (Reply-To, List-Unsubscribe, Date)
  *   - BRIEFING_READ_TOKEN 401/403 시 명확한 진단 로그 → 관리UI 수신자 반영 안되는 상황 가시화
@@ -119,6 +119,24 @@
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
+      }),
+    // (v2.2.7) 일괄 작업 / Export / Import / Backup
+    bulk: (ids, action) =>
+      safeFetch('/api/admin/recipients/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, action }),
+      }),
+    importData: (recipients, mode) =>
+      safeFetch('/api/admin/recipients/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipients, mode }),
+      }),
+    listBackups: () => safeFetch('/api/admin/recipients/backups'),
+    restoreBackup: (date) =>
+      safeFetch('/api/admin/recipients/backups/' + encodeURIComponent(date) + '/restore', {
+        method: 'POST',
       }),
   }
 
@@ -741,66 +759,183 @@
   }
 
   // ═════════════════════════════════════════════════════════════
-  // 수신자 (변경 없음)
+  // 📬 수신자 관리 (v2.2.7 대폭 업그레이드)
+  //   - 편집 버튼: 이메일/별명 수정 모달
+  //   - 체크박스 + 일괄 작업 (활성/비활성/삭제)
+  //   - Export / Import (JSON)
+  //   - 발송 이력 표시 (lastSentAt, sentCount, lastFailedReason)
+  //   - 커스텀 confirm 모달 (PWA/모바일에서도 확실히 동작)
+  //   - 자동 백업 (7일 보관, 복원 가능)
   // ═════════════════════════════════════════════════════════════
+  let currentRecipients = []           // 마지막 로드된 수신자 목록 (편집/일괄작업용 캐시)
+  const selectedRecipientIds = new Set()
+
+  function fmtDate(iso) {
+    if (!iso) return ''
+    try { return new Date(iso).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) }
+    catch { return iso }
+  }
+
+  function fmtRelative(iso) {
+    if (!iso) return '없음'
+    try {
+      const diff = Date.now() - new Date(iso).getTime()
+      if (diff < 60_000) return '방금 전'
+      if (diff < 3600_000) return `${Math.floor(diff/60_000)}분 전`
+      if (diff < 86400_000) return `${Math.floor(diff/3600_000)}시간 전`
+      if (diff < 7 * 86400_000) return `${Math.floor(diff/86400_000)}일 전`
+      return new Date(iso).toLocaleDateString('ko-KR')
+    } catch { return '' }
+  }
+
   function renderRecipients(recipients) {
+    currentRecipients = Array.isArray(recipients) ? recipients : []
     const recipientListEl = document.getElementById('recipientList')
     const recipientCountEl = document.getElementById('recipientCount')
-    recipientCountEl.textContent = `(총 ${recipients.length}명)`
-    if (recipients.length === 0) {
+    const activeCount = currentRecipients.filter(r => r.enabled).length
+    const inactiveCount = currentRecipients.length - activeCount
+    recipientCountEl.innerHTML = `(총 <strong>${currentRecipients.length}</strong>명 · 활성 ${activeCount}${inactiveCount > 0 ? ` · 비활성 ${inactiveCount}` : ''})`
+
+    // 선택 상태 정리 — 삭제된 ID 는 Set 에서 제거
+    const validIds = new Set(currentRecipients.map(r => r.id))
+    for (const id of Array.from(selectedRecipientIds)) {
+      if (!validIds.has(id)) selectedRecipientIds.delete(id)
+    }
+
+    if (currentRecipients.length === 0) {
       recipientListEl.innerHTML = `
         <div class="text-center py-6 text-gray-400 text-sm">
           <i class="fa-regular fa-envelope text-3xl mb-2"></i>
           <p>등록된 수신자가 없습니다.</p>
         </div>`
+      updateBulkBar()
       return
     }
-    recipientListEl.innerHTML = recipients
-      .map(
-        (r) => `
-        <div class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg ${r.enabled ? 'bg-emerald-50/30' : 'bg-gray-50'}">
-          <i class="fa-solid fa-envelope ${r.enabled ? 'text-emerald-500' : 'text-gray-300'} text-xl"></i>
+
+    recipientListEl.innerHTML = currentRecipients
+      .map((r) => {
+        const isChecked = selectedRecipientIds.has(r.id)
+        const sentInfo = r.sentCount || r.lastSentAt
+          ? `<span class="text-xs text-emerald-600" title="총 ${r.sentCount || 0}회 발송 성공">
+               <i class="fa-solid fa-paper-plane"></i> ${r.sentCount || 0}회
+               ${r.lastSentAt ? ` · <span class="text-gray-500">마지막 ${fmtRelative(r.lastSentAt)}</span>` : ''}
+             </span>`
+          : '<span class="text-xs text-gray-400" title="발송 이력 없음"><i class="fa-regular fa-circle"></i> 이력 없음</span>'
+        const failedInfo = r.lastFailedReason
+          ? `<div class="text-xs text-rose-500 mt-1 truncate" title="${escapeHtml(r.lastFailedReason)}">
+               <i class="fa-solid fa-triangle-exclamation"></i> 최근 실패: ${escapeHtml(r.lastFailedReason.slice(0, 60))}
+             </div>`
+          : ''
+        return `
+        <div class="recipient-row flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3 border rounded-lg transition ${r.enabled ? 'bg-emerald-50/30 border-emerald-100 hover:border-emerald-300' : 'bg-gray-50 border-gray-200'} ${isChecked ? 'ring-2 ring-sky-300' : ''}"
+             data-rid="${r.id}">
+          <label class="flex-shrink-0 cursor-pointer p-1 -m-1">
+            <input type="checkbox" class="recipient-checkbox w-4 h-4 sm:w-5 sm:h-5 accent-sky-500" data-rid="${r.id}" ${isChecked ? 'checked' : ''}>
+          </label>
+          <i class="fa-solid fa-envelope ${r.enabled ? 'text-emerald-500' : 'text-gray-300'} text-lg sm:text-xl hidden sm:block"></i>
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
-              <strong class="text-gray-800">${escapeHtml(r.email)}</strong>
+              <strong class="text-gray-800 text-sm sm:text-base break-all">${escapeHtml(r.email)}</strong>
               ${r.label ? `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">${escapeHtml(r.label)}</span>` : ''}
               ${r.enabled
                 ? '<span class="text-xs text-emerald-600"><i class="fa-solid fa-circle-check"></i> 활성</span>'
                 : '<span class="text-xs text-gray-400"><i class="fa-solid fa-circle-pause"></i> 비활성</span>'}
             </div>
-            <div class="text-xs text-gray-400 mt-0.5">등록: ${new Date(r.createdAt).toLocaleString('ko-KR')}</div>
+            <div class="flex items-center gap-3 flex-wrap mt-1 text-xs text-gray-500">
+              <span title="등록: ${fmtDate(r.createdAt)}"><i class="fa-regular fa-calendar-plus"></i> ${fmtRelative(r.createdAt)}</span>
+              ${r.updatedAt ? `<span title="마지막 수정: ${fmtDate(r.updatedAt)}"><i class="fa-solid fa-pen"></i> ${fmtRelative(r.updatedAt)}</span>` : ''}
+              ${sentInfo}
+            </div>
+            ${failedInfo}
           </div>
-          <div class="flex gap-1">
-            <button data-raction="toggle" data-rid="${r.id}" data-renabled="${r.enabled}" class="px-2.5 py-1.5 rounded hover:bg-gray-100">
-              <i class="fa-solid ${r.enabled ? 'fa-toggle-on text-emerald-500' : 'fa-toggle-off text-gray-400'} text-base"></i>
+          <div class="flex gap-0.5 sm:gap-1 flex-shrink-0">
+            <button data-raction="toggle" data-rid="${r.id}" data-renabled="${r.enabled}" class="touch-target w-10 h-10 sm:w-11 sm:h-11 flex items-center justify-center rounded-lg hover:bg-gray-100" title="${r.enabled ? '비활성화' : '활성화'}">
+              <i class="fa-solid ${r.enabled ? 'fa-toggle-on text-emerald-500' : 'fa-toggle-off text-gray-400'} text-lg"></i>
             </button>
-            <button data-raction="delete" data-rid="${r.id}" class="px-2.5 py-1.5 text-red-500 rounded hover:bg-red-50">
+            <button data-raction="edit" data-rid="${r.id}" class="touch-target w-10 h-10 sm:w-11 sm:h-11 flex items-center justify-center text-sky-600 rounded-lg hover:bg-sky-50" title="편집">
+              <i class="fa-solid fa-pen-to-square"></i>
+            </button>
+            <button data-raction="delete" data-rid="${r.id}" class="touch-target w-10 h-10 sm:w-11 sm:h-11 flex items-center justify-center text-rose-500 rounded-lg hover:bg-rose-50" title="삭제">
               <i class="fa-solid fa-trash"></i>
             </button>
           </div>
         </div>`
-      )
+      })
       .join('')
+
+    // 이벤트 바인딩
     document.querySelectorAll('#recipientList button[data-raction]').forEach((btn) => {
       btn.addEventListener('click', onRecipientAction)
     })
+    document.querySelectorAll('#recipientList .recipient-checkbox').forEach((cb) => {
+      cb.addEventListener('change', onRecipientCheckbox)
+    })
+    updateBulkBar()
+  }
+
+  function onRecipientCheckbox(e) {
+    const id = e.currentTarget.dataset.rid
+    if (e.currentTarget.checked) selectedRecipientIds.add(id)
+    else selectedRecipientIds.delete(id)
+    // 행 하이라이트 즉시 갱신
+    const row = document.querySelector(`.recipient-row[data-rid="${id}"]`)
+    if (row) row.classList.toggle('ring-2', e.currentTarget.checked)
+    if (row) row.classList.toggle('ring-sky-300', e.currentTarget.checked)
+    updateBulkBar()
+  }
+
+  function updateBulkBar() {
+    const bar = document.getElementById('recipientBulkBar')
+    if (!bar) return
+    const count = selectedRecipientIds.size
+    if (count === 0) {
+      bar.classList.add('hidden')
+    } else {
+      bar.classList.remove('hidden')
+      const countEl = document.getElementById('recipientBulkCount')
+      if (countEl) countEl.textContent = count
+    }
+    // 전체선택 체크박스 상태
+    const all = document.getElementById('recipientCheckAll')
+    if (all) {
+      all.checked = currentRecipients.length > 0 && count === currentRecipients.length
+      all.indeterminate = count > 0 && count < currentRecipients.length
+    }
   }
 
   async function onRecipientAction(e) {
     const btn = e.currentTarget
     const id = btn.dataset.rid
     const action = btn.dataset.raction
+    const target = currentRecipients.find(r => r.id === id)
+    if (!target) return
     try {
       if (action === 'toggle') {
         const enabled = btn.dataset.renabled !== 'true'
         const res = await recipientApi.patch(id, { enabled })
         if (res?.error) return toast('❌ ' + res.error, 'error')
+        toast(`${enabled ? '✅ 활성화' : '⏸ 비활성화'} · ${target.email}`, 'success')
         await reloadRecipients()
         notifyOtherTabs('recipients')
+      } else if (action === 'edit') {
+        openRecipientEditModal(target)
       } else if (action === 'delete') {
-        if (!confirm('이 수신자를 삭제할까요?')) return
+        const ok = await showConfirm({
+          title: '수신자 삭제',
+          message: `<div>다음 수신자를 삭제합니다:</div>
+                    <div class="mt-2 p-3 bg-rose-50 border border-rose-200 rounded-lg font-semibold text-rose-800 break-all">
+                      ${escapeHtml(target.email)}${target.label ? ' (' + escapeHtml(target.label) + ')' : ''}
+                    </div>
+                    <div class="mt-2 text-xs text-gray-500">🛡️ 실수로 삭제해도 7일 이내라면 자동 백업에서 복원 가능합니다.</div>`,
+          confirmText: '삭제',
+          cancelText: '취소',
+          danger: true,
+        })
+        if (!ok) return
         const res = await recipientApi.remove(id)
         if (res?.error) return toast('❌ ' + res.error, 'error')
+        toast(`🗑️ 삭제됨 · ${target.email}`, 'success')
+        selectedRecipientIds.delete(id)
         await reloadRecipients()
         notifyOtherTabs('recipients')
       }
@@ -810,6 +945,113 @@
     }
   }
 
+  /** 수신자 편집 모달 열기 — 이메일/별명/활성 상태 수정 */
+  function openRecipientEditModal(recipient) {
+    let modal = document.getElementById('recipientEditModal')
+    if (!modal) {
+      // 모달이 아직 DOM 에 없으면 동적으로 생성 (HTML 렌더링 확장 없이 추가)
+      modal = document.createElement('div')
+      modal.id = 'recipientEditModal'
+      modal.className = 'modal-hidden fixed inset-0 bg-black/50 z-50 p-4 overflow-y-auto'
+      modal.innerHTML = `
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md mx-auto my-auto p-5 sm:p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-bold text-gray-800"><i class="fa-solid fa-pen-to-square text-sky-500 mr-2"></i>수신자 편집</h3>
+            <button id="btnRecipientEditClose" class="touch-target w-10 h-10 flex items-center justify-center text-gray-400 hover:text-gray-600 rounded-lg">
+              <i class="fa-solid fa-xmark text-xl"></i>
+            </button>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">이메일 주소</label>
+              <input id="recipientEditEmail" type="email" autocomplete="email" inputmode="email"
+                     class="touch-target w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">별명 <span class="text-gray-400 text-xs">(선택)</span></label>
+              <input id="recipientEditLabel" type="text"
+                     class="touch-target w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                     placeholder="예: 홍길동, 팀장님">
+            </div>
+            <label class="flex items-center gap-2 p-2 rounded-lg bg-gray-50 cursor-pointer">
+              <input id="recipientEditEnabled" type="checkbox" class="w-5 h-5 accent-emerald-500">
+              <span class="text-sm text-gray-700">활성 상태 (매일 브리핑 수신)</span>
+            </label>
+            <div id="recipientEditError" class="hidden text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg p-2"></div>
+            <div id="recipientEditStats" class="text-xs text-gray-500 border-t pt-3"></div>
+          </div>
+          <div class="flex gap-2 mt-5">
+            <button id="btnRecipientEditCancel" class="touch-target flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition">취소</button>
+            <button id="btnRecipientEditSave" class="touch-target flex-1 px-4 py-2.5 bg-sky-600 text-white font-semibold rounded-lg hover:bg-sky-700 transition">
+              <i class="fa-solid fa-check mr-1"></i>저장
+            </button>
+          </div>
+        </div>`
+      document.body.appendChild(modal)
+    }
+
+    // 값 채우기
+    document.getElementById('recipientEditEmail').value = recipient.email || ''
+    document.getElementById('recipientEditLabel').value = recipient.label || ''
+    document.getElementById('recipientEditEnabled').checked = !!recipient.enabled
+    const errEl = document.getElementById('recipientEditError')
+    errEl.classList.add('hidden'); errEl.textContent = ''
+
+    // 통계 표시
+    const statsEl = document.getElementById('recipientEditStats')
+    statsEl.innerHTML = `
+      등록: ${fmtDate(recipient.createdAt)}
+      ${recipient.updatedAt ? `<br>마지막 수정: ${fmtDate(recipient.updatedAt)}` : ''}
+      ${recipient.lastSentAt ? `<br>마지막 발송: ${fmtDate(recipient.lastSentAt)} (총 ${recipient.sentCount || 0}회)` : ''}
+      ${recipient.lastFailedReason ? `<br><span class="text-rose-500">최근 실패: ${escapeHtml(recipient.lastFailedReason)}</span>` : ''}`
+
+    showModal(modal)
+
+    // 이벤트 (매번 새로 바인딩 — 이전 핸들러 제거용으로 .cloneNode 사용)
+    const saveBtn = document.getElementById('btnRecipientEditSave')
+    const cancelBtn = document.getElementById('btnRecipientEditCancel')
+    const closeBtn = document.getElementById('btnRecipientEditClose')
+    // 기존 핸들러 제거 — clone 으로 replace
+    const newSave = saveBtn.cloneNode(true); saveBtn.parentNode.replaceChild(newSave, saveBtn)
+    const newCancel = cancelBtn.cloneNode(true); cancelBtn.parentNode.replaceChild(newCancel, cancelBtn)
+    const newClose = closeBtn.cloneNode(true); closeBtn.parentNode.replaceChild(newClose, closeBtn)
+
+    const closeHandler = () => hideModal(modal)
+    newCancel.addEventListener('click', closeHandler)
+    newClose.addEventListener('click', closeHandler)
+
+    newSave.addEventListener('click', async () => {
+      const email = document.getElementById('recipientEditEmail').value.trim().toLowerCase()
+      const label = document.getElementById('recipientEditLabel').value.trim()
+      const enabled = document.getElementById('recipientEditEnabled').checked
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errEl.textContent = '올바른 이메일 주소를 입력해 주세요.'
+        errEl.classList.remove('hidden'); return
+      }
+      newSave.disabled = true
+      newSave.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>저장 중…'
+      try {
+        const res = await recipientApi.patch(recipient.id, { email, label, enabled })
+        if (res?.error) {
+          errEl.textContent = '❌ ' + res.error
+          errEl.classList.remove('hidden')
+          newSave.disabled = false
+          newSave.innerHTML = '<i class="fa-solid fa-check mr-1"></i>저장'
+          return
+        }
+        hideModal(modal)
+        toast(res.changed ? `✅ 수정됨 · ${email}` : 'ℹ️ 변경사항 없음', 'success')
+        await reloadRecipients()
+        notifyOtherTabs('recipients')
+      } catch (e) {
+        errEl.textContent = '❌ ' + (e?.message || e)
+        errEl.classList.remove('hidden')
+        newSave.disabled = false
+        newSave.innerHTML = '<i class="fa-solid fa-check mr-1"></i>저장'
+      }
+    })
+  }
+
   async function reloadRecipients() {
     try {
       const data = await recipientApi.list()
@@ -817,6 +1059,137 @@
     } catch (e) {
       document.getElementById('recipientList').innerHTML =
         `<div class="text-red-500 p-4 text-sm">수신자 목록 로드 실패: ${e.message}</div>`
+    }
+  }
+
+  // ─── 일괄 작업 핸들러 ──────────────────────────────────────
+  async function onBulkAction(action) {
+    const ids = Array.from(selectedRecipientIds)
+    if (ids.length === 0) return toast('선택된 수신자가 없습니다', 'error')
+    const targets = currentRecipients.filter(r => ids.includes(r.id))
+    const emailPreview = targets.slice(0, 5).map(r => r.email).join(', ') + (targets.length > 5 ? ` 외 ${targets.length - 5}명` : '')
+
+    const actionLabel = { enable: '활성화', disable: '비활성화', delete: '삭제' }[action]
+    const danger = action === 'delete'
+    const ok = await showConfirm({
+      title: `일괄 ${actionLabel}`,
+      message: `<div><strong>${ids.length}명</strong>의 수신자를 일괄 ${actionLabel}합니다:</div>
+                <div class="mt-2 p-3 bg-gray-50 border rounded-lg text-xs break-all">${escapeHtml(emailPreview)}</div>
+                ${danger ? '<div class="mt-2 text-xs text-gray-500">🛡️ 7일간 자동 백업에 보관되어 복원 가능합니다.</div>' : ''}`,
+      confirmText: actionLabel,
+      cancelText: '취소',
+      danger,
+    })
+    if (!ok) return
+    try {
+      const res = await recipientApi.bulk(ids, action)
+      if (res?.error) return toast('❌ ' + res.error, 'error')
+      toast(`✅ ${res.affected}명 ${actionLabel} 완료`, 'success')
+      selectedRecipientIds.clear()
+      await reloadRecipients()
+      notifyOtherTabs('recipients')
+    } catch (e) {
+      toast('❌ ' + (e?.message || e), 'error')
+    }
+  }
+
+  // ─── Export / Import ─────────────────────────────────────
+  function onExportRecipients() {
+    // 브라우저에서 직접 파일 다운로드 — window.location 사용하면 세션 쿠키 자동 포함
+    const link = document.createElement('a')
+    link.href = '/api/admin/recipients/export'
+    link.download = `recipients_${new Date().toISOString().slice(0,10)}.json`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    toast('📦 수신자 목록 다운로드 시작', 'success')
+  }
+
+  async function onImportRecipientsFile(file) {
+    if (!file) return
+    if (file.size > 1024 * 1024) {
+      return toast('❌ 파일이 너무 큽니다 (1MB 이하)', 'error')
+    }
+    let recipients
+    try {
+      const text = await file.text()
+      // JSON 먼저 시도
+      if (file.name.endsWith('.json')) {
+        const parsed = JSON.parse(text)
+        recipients = Array.isArray(parsed) ? parsed : (parsed.recipients || [])
+      } else {
+        // CSV/줄바꿈 이메일 목록
+        recipients = text.split(/[\n,;]/).map(s => s.trim()).filter(s => s && s.includes('@'))
+      }
+    } catch (e) {
+      return toast('❌ 파일 형식 오류: ' + (e?.message || e), 'error')
+    }
+    if (!Array.isArray(recipients) || recipients.length === 0) {
+      return toast('❌ 가져올 수신자가 없습니다', 'error')
+    }
+
+    const mode = await new Promise((resolve) => {
+      showConfirm({
+        title: '가져오기 방식 선택',
+        message: `<div><strong>${recipients.length}개</strong> 수신자 항목을 가져옵니다.</div>
+                  <div class="mt-3 space-y-2">
+                    <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs">
+                      <strong>합치기 (권장)</strong>: 기존 수신자는 유지하고 새 이메일만 추가
+                    </div>
+                    <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs">
+                      <strong>대체</strong>: 기존 목록을 모두 지우고 새로 덮어쓰기 (위험)
+                    </div>
+                  </div>`,
+        confirmText: '합치기',
+        cancelText: '취소',
+      }).then((merged) => resolve(merged ? 'merge' : null))
+    })
+    if (!mode) return
+
+    try {
+      const res = await recipientApi.importData(recipients, mode)
+      if (res?.error) return toast('❌ ' + res.error, 'error')
+      const errMsg = res.errors && res.errors.length ? ` · 무효 ${res.errors.length}건` : ''
+      toast(`📥 가져오기 완료: 추가 ${res.added}, 건너뜀 ${res.skipped}${errMsg}`, 'success')
+      await reloadRecipients()
+      notifyOtherTabs('recipients')
+    } catch (e) {
+      toast('❌ ' + (e?.message || e), 'error')
+    }
+  }
+
+  function setupRecipientBulkHandlers() {
+    const checkAll = document.getElementById('recipientCheckAll')
+    if (checkAll) {
+      checkAll.addEventListener('change', (e) => {
+        if (e.target.checked) {
+          currentRecipients.forEach(r => selectedRecipientIds.add(r.id))
+        } else {
+          selectedRecipientIds.clear()
+        }
+        renderRecipients(currentRecipients)
+      })
+    }
+    const btnMap = {
+      btnBulkEnable: () => onBulkAction('enable'),
+      btnBulkDisable: () => onBulkAction('disable'),
+      btnBulkDelete: () => onBulkAction('delete'),
+      btnBulkClear: () => { selectedRecipientIds.clear(); renderRecipients(currentRecipients) },
+      btnExportRecipients: onExportRecipients,
+    }
+    for (const [id, handler] of Object.entries(btnMap)) {
+      const btn = document.getElementById(id)
+      if (btn) btn.addEventListener('click', handler)
+    }
+    const importInput = document.getElementById('recipientImportInput')
+    const importBtn = document.getElementById('btnImportRecipients')
+    if (importBtn && importInput) {
+      importBtn.addEventListener('click', () => importInput.click())
+      importInput.addEventListener('change', async (e) => {
+        const file = e.target.files && e.target.files[0]
+        if (file) await onImportRecipientsFile(file)
+        e.target.value = ''  // 같은 파일 재선택 가능하도록
+      })
     }
   }
 
@@ -893,27 +1266,70 @@
   // ═════════════════════════════════════════════════════════════
   let triggerPollTimer = null
 
-  function showConfirm(title, body, onOk) {
+  /**
+   * (v2.2.7) 범용 확인 다이얼로그 — 두 가지 호출 방식 모두 지원:
+   *   1) showConfirm(title, bodyHtml, onOk) — 콜백 스타일 (레거시)
+   *   2) showConfirm({title, message, confirmText, cancelText, danger}) — Promise<boolean> 반환
+   *
+   *   danger: true 이면 OK 버튼이 빨간색으로 표시됨 (삭제 등 위험 작업)
+   */
+  function showConfirm(arg1, arg2, arg3) {
+    // 호출 방식 감지
+    const isObjectStyle = arg1 && typeof arg1 === 'object' && arg2 === undefined
+    const opts = isObjectStyle ? arg1 : { title: arg1, body: arg2, _cb: arg3 }
+
+    const title = opts.title || '확인'
+    const body = opts.message || opts.body || ''
+    const confirmText = opts.confirmText || '확인'
+    const cancelText = opts.cancelText || '취소'
+    const danger = opts.danger === true
+
     const m = document.getElementById('confirmModal')
     if (!m) {
       console.error('[showConfirm] confirmModal not found - falling back to native confirm')
-      if (window.confirm(title + '\n' + body.replace(/<[^>]+>/g, ''))) onOk()
+      const plainText = (typeof body === 'string' ? body.replace(/<[^>]+>/g, '') : '')
+      const result = window.confirm(title + '\n' + plainText)
+      if (isObjectStyle) return Promise.resolve(result)
+      if (result && typeof opts._cb === 'function') opts._cb()
       return
     }
+
     document.getElementById('confirmTitle').textContent = title
-    document.getElementById('confirmBody').innerHTML = body
-    showModal(m)
+    // body 가 줄바꿈 있는 plain text 이면 <br> 로 변환, HTML 태그 있으면 그대로
+    const bodyEl = document.getElementById('confirmBody')
+    if (/<[a-z][\s\S]*>/i.test(body)) {
+      bodyEl.innerHTML = body
+    } else {
+      bodyEl.innerHTML = escapeHtml(body).replace(/\n/g, '<br/>')
+    }
+
     const okBtn = document.getElementById('btnConfirmOk')
     const cancelBtn = document.getElementById('btnConfirmCancel')
-    const close = () => hideModal(m)
-    const handler = () => {
-      close()
-      okBtn.removeEventListener('click', handler)
-      cancelBtn.removeEventListener('click', close)
-      onOk()
+    if (okBtn) {
+      okBtn.textContent = confirmText
+      okBtn.className = danger
+        ? 'px-5 py-2.5 bg-rose-600 text-white font-semibold rounded-lg hover:bg-rose-700 transition shadow-sm'
+        : 'px-5 py-2.5 bg-orange-500 text-white font-semibold rounded-lg hover:bg-orange-600 transition shadow-sm'
     }
-    okBtn.addEventListener('click', handler, { once: true })
-    cancelBtn.addEventListener('click', close, { once: true })
+    if (cancelBtn) cancelBtn.textContent = cancelText
+
+    showModal(m)
+
+    return new Promise((resolve) => {
+      const cleanup = () => {
+        hideModal(m)
+        okBtn.removeEventListener('click', onOk)
+        cancelBtn.removeEventListener('click', onCancel)
+      }
+      const onOk = () => {
+        cleanup()
+        if (!isObjectStyle && typeof opts._cb === 'function') opts._cb()
+        resolve(true)
+      }
+      const onCancel = () => { cleanup(); resolve(false) }
+      okBtn.addEventListener('click', onOk, { once: true })
+      cancelBtn.addEventListener('click', onCancel, { once: true })
+    })
   }
 
   function showTriggerStatus(cls, html) {
@@ -1065,7 +1481,7 @@
       if (match.status === 'completed') {
         clearInterval(triggerPollTimer)
         if (match.conclusion === 'success') {
-          // (v2.2.6) 실제 발송 완료 시 스팸 폴더 확인 안내 - 과거 사용자가
+          // (v2.2.7) 실제 발송 완료 시 스팸 폴더 확인 안내 - 과거 사용자가
           // '워크플로 성공'만 보고 받은메일함에서 못 찾아 "발송 안됨"으로 오해한 버그 대응
           const spamHint = dryRun ? '' :
             '<div class="text-xs mt-2 p-2 bg-white/60 rounded border border-green-300 text-green-900">' +
@@ -1149,7 +1565,7 @@
   }
 
   // ═════════════════════════════════════════════════════════════
-  // 🩺 (v2.2.6) 수신자 동기화 진단 + MailChannels 즉시 테스트
+  // 🩺 (v2.2.7) 수신자 동기화 진단 + MailChannels 즉시 테스트
   //   네이버/다음 수신자에게 메일이 안 가는 문제의 근본 원인(BRIEFING_READ_TOKEN
   //   CF↔GH 불일치)을 즉시 파악하고, 테스트 발송으로 스팸 필터 여부까지 점검.
   // ═════════════════════════════════════════════════════════════
@@ -1429,11 +1845,12 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.2.6 초기화 중…')
+  console.log('[MorningStock] Admin v2.2.7 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
   setupDiagButtons()
+  setupRecipientBulkHandlers()
   loadPresets().then(() => reload())
   reloadRecipients()
   checkTriggerConfig()

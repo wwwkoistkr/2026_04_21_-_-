@@ -29,7 +29,7 @@ export const renderer = jsxRenderer(({ children, title }: any) => {
         <link rel="manifest" href="/static/manifest.json" />
         <meta name="theme-color" content="#f59e0b" media="(prefers-color-scheme: light)" />
         <meta name="theme-color" content="#b45309" media="(prefers-color-scheme: dark)" />
-        {/* (v2.2.6) OS 다크모드 환경에서도 라이트 UI 고정 — input 배경 검정 버그 방지 */}
+        {/* (v2.2.7) OS 다크모드 환경에서도 라이트 UI 고정 — input 배경 검정 버그 방지 */}
         <meta name="color-scheme" content="light only" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="application-name" content="Morning Stock" />
@@ -73,7 +73,7 @@ export const renderer = jsxRenderer(({ children, title }: any) => {
           href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"
           rel="stylesheet"
         />
-        <link href="/static/style.css?v=2.2.6" rel="stylesheet" />
+        <link href="/static/style.css?v=2.2.7" rel="stylesheet" />
 
         {/* Tailwind 설정: 고해상도 디스플레이 대응 breakpoints */}
         <script

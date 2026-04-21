@@ -24,7 +24,7 @@ type Bindings = {
   GITHUB_TRIGGER_TOKEN?: string        // GitHub PAT (repo + workflow 권한) — 지금 발송용
   GITHUB_REPO?: string                 // 예: "wwwkoistkr/2026_04_21_-_-" (기본값 하드코딩)
   GITHUB_WORKFLOW_FILE?: string        // 예: "daily_briefing.yml"
-  // (v2.2.6) MailChannels 기반 테스트 발송용 — Cloudflare 에서 바로 보낼 때 사용
+  // (v2.2.7) MailChannels 기반 테스트 발송용 — Cloudflare 에서 바로 보낼 때 사용
   EMAIL_SENDER?: string                // 발신자 Gmail 주소 (GitHub Secret 과 동일)
   EMAIL_APP_PASSWORD?: string          // 참조용 (Cloudflare Worker 에서는 SMTP 불가)
 }
@@ -59,6 +59,14 @@ interface EmailRecipient {
   label?: string
   enabled: boolean
   createdAt: string
+  // (v2.2.7) 발송 이력 추적 — Python 메일 모듈이 성공/실패 후 POST /api/public/recipient-events 로 기록
+  updatedAt?: string            // 마지막 편집 일시 (email/label 변경 시 갱신)
+  lastSentAt?: string           // 마지막 발송 성공 일시
+  lastAttemptAt?: string        // 마지막 발송 시도 일시 (성공/실패 무관)
+  lastFailedAt?: string         // 마지막 발송 실패 일시
+  lastFailedReason?: string     // 마지막 실패 사유 (SMTP code + message)
+  sentCount?: number            // 누적 성공 건수
+  failedCount?: number          // 누적 실패 건수
 }
 
 const app = new Hono<{ Bindings: Bindings }>()
@@ -72,7 +80,7 @@ const KV_KEY_RECIPIENTS = 'recipients:v1'
 const KV_KEY_LAST_TRIGGER = 'trigger:last'     // "지금 발송" rate-limit 용
 const KV_KEY_SYNC_VERSION = 'sync:version'     // PC ↔ 모바일 실시간 동기화용 카운터
 const SESSION_COOKIE = 'msaic_session'
-// (v2.2.6) 12시간 → 2시간으로 단축. 사용자 요구 "첫 화면에 비밀번호"
+// (v2.2.7) 12시간 → 2시간으로 단축. 사용자 요구 "첫 화면에 비밀번호"
 // 를 만족시키기 위함. 자주 사용하는 사용자는 모바일 PWA에 저장된 비밀번호로
 // 바로 로그인되므로 UX 저하는 미미함.
 const SESSION_TTL_SEC = 60 * 60 * 2            // 2시간
@@ -371,7 +379,7 @@ app.post('/logout', (c) => {
   return c.redirect('/login?logout=1')
 })
 
-// (v2.2.6) GET 요청으로도 로그아웃 가능 — 모바일 PWA 북마크/빠른 실행용
+// (v2.2.7) GET 요청으로도 로그아웃 가능 — 모바일 PWA 북마크/빠른 실행용
 app.get('/logout', (c) => {
   setCookie(c, SESSION_COOKIE, '', { path: '/', maxAge: 0 })
   return c.redirect('/login?logout=1')
@@ -401,7 +409,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.2.6
+                Daily Briefing Admin v2.2.7
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -455,7 +463,7 @@ app.get('/', (c) => {
         </div>
       </section>
 
-      {/* 🩺 (v2.2.6) 수신자 동기화 진단 + MailChannels 직접 테스트 — 네이버 미수신 해결용 */}
+      {/* 🩺 (v2.2.7) 수신자 동기화 진단 + MailChannels 직접 테스트 — 네이버 미수신 해결용 */}
       <section class="bg-gradient-to-br from-sky-50 to-indigo-50 border-2 border-sky-200 rounded-2xl shadow p-4 sm:p-6 mb-6">
         <div class="flex items-start gap-3 sm:gap-4">
           <div class="flex-shrink-0 text-3xl sm:text-4xl pt-1">🩺</div>
@@ -518,13 +526,56 @@ app.get('/', (c) => {
             <i class="fa-solid fa-plus mr-1"></i> 수신자 추가
           </button>
         </form>
-        <div class="flex items-center justify-between mt-5 mb-3">
-          <h3 class="text-sm font-semibold text-gray-700">
-            <i class="fa-solid fa-users mr-1 text-emerald-500"></i>
+        <div class="flex items-center justify-between mt-5 mb-3 gap-2 flex-wrap">
+          <h3 class="text-sm font-semibold text-gray-700 flex items-center gap-2">
+            <label class="flex items-center gap-1.5 cursor-pointer select-none" title="전체 선택/해제">
+              <input id="recipientCheckAll" type="checkbox" class="w-4 h-4 accent-sky-500" />
+            </label>
+            <i class="fa-solid fa-users text-emerald-500"></i>
             현재 등록된 수신자
+            <span id="recipientCount" class="text-xs text-gray-500 font-normal">(불러오는 중…)</span>
           </h3>
-          <span id="recipientCount" class="text-xs text-gray-500">(불러오는 중…)</span>
+          {/* (v2.2.7) Export / Import 버튼 */}
+          <div class="flex items-center gap-1">
+            <button id="btnExportRecipients"
+              class="touch-target px-2.5 py-1.5 text-xs text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+              title="JSON 파일로 내보내기 (백업)">
+              <i class="fa-solid fa-download mr-1"></i>내보내기
+            </button>
+            <input id="recipientImportInput" type="file" accept=".json,.csv,.txt" class="hidden" />
+            <button id="btnImportRecipients"
+              class="touch-target px-2.5 py-1.5 text-xs text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+              title="JSON/CSV 파일에서 가져오기">
+              <i class="fa-solid fa-upload mr-1"></i>가져오기
+            </button>
+          </div>
         </div>
+
+        {/* (v2.2.7) 일괄 작업 툴바 — 체크박스 선택 시만 표시 */}
+        <div id="recipientBulkBar" class="hidden mb-3 p-2.5 bg-sky-50 border border-sky-200 rounded-lg flex items-center gap-2 flex-wrap">
+          <span class="text-sm font-semibold text-sky-800">
+            <i class="fa-solid fa-check-double mr-1"></i>
+            <span id="recipientBulkCount">0</span>명 선택됨
+          </span>
+          <div class="flex-1"></div>
+          <button id="btnBulkEnable"
+            class="touch-target px-3 py-1.5 text-xs font-medium bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition">
+            <i class="fa-solid fa-toggle-on mr-1"></i>활성화
+          </button>
+          <button id="btnBulkDisable"
+            class="touch-target px-3 py-1.5 text-xs font-medium bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition">
+            <i class="fa-solid fa-toggle-off mr-1"></i>비활성화
+          </button>
+          <button id="btnBulkDelete"
+            class="touch-target px-3 py-1.5 text-xs font-medium bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition">
+            <i class="fa-solid fa-trash mr-1"></i>삭제
+          </button>
+          <button id="btnBulkClear"
+            class="touch-target px-2.5 py-1.5 text-xs text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition">
+            <i class="fa-solid fa-xmark mr-1"></i>선택해제
+          </button>
+        </div>
+
         <div id="recipientList" class="space-y-2">
           <div class="text-center text-gray-400 py-6 text-sm">불러오는 중…</div>
         </div>
@@ -603,7 +654,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2.6</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2.7</span></p>
         <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -659,7 +710,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="toast-hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js?v=2.2.6"></script>
+      <script src="/static/admin.js?v=2.2.7"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )
@@ -729,7 +780,7 @@ app.get('/api/admin/trigger-status', async (c) => {
 })
 
 /**
- * (v2.2.6) 수신자 동기화 진단 — "왜 이메일이 특정 사람에게만 가는가" 해결용
+ * (v2.2.7) 수신자 동기화 진단 — "왜 이메일이 특정 사람에게만 가는가" 해결용
  *
  * 관리 UI 에 등록된 수신자들이 실제 GitHub Actions 파이프라인에 반영되려면
  * Cloudflare Pages 의 BRIEFING_READ_TOKEN 과 GitHub Secrets 의 BRIEFING_READ_TOKEN
@@ -780,7 +831,7 @@ app.get('/api/admin/diag-recipient-sync', async (c) => {
 })
 
 /**
- * (v2.2.6) SMTP 직접 발송 테스트 — 관리 UI 에서 특정 수신자에게만 테스트 메일
+ * (v2.2.7) SMTP 직접 발송 테스트 — 관리 UI 에서 특정 수신자에게만 테스트 메일
  *  - GitHub Actions 우회 → Cloudflare Worker 에서 직접 발송 (즉시 결과 확인)
  *  - BRIEFING_READ_TOKEN 문제와 무관하게 동작
  *  - 네이버/구글/기타 수신자 도착 여부를 각각 빠르게 점검 가능
@@ -1181,11 +1232,33 @@ function extractTitles(xml: string): string[] {
 }
 
 // ─── 이메일 수신자 API ───────────────────────────────────────────────
+// (v2.2.7) 자동 백업 헬퍼 — 변경 전 상태를 KV 에 YYYYMMDD 키로 보관 (7일 TTL)
+async function backupRecipients(env: Bindings, before: EmailRecipient[]): Promise<void> {
+  try {
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')  // 20260421
+    const key = `recipients:backup:${today}`
+    // 같은 날짜에 여러 번 변경하더라도 "그날 첫 변경 직전 상태" 를 유지 (최초 1회만 쓰기)
+    const existing = await env.SOURCES_KV.get(key)
+    if (!existing) {
+      // 7일 TTL — KV 는 최소 60초, 604800초 = 7일
+      await env.SOURCES_KV.put(key, JSON.stringify({
+        snapshot: before,
+        backedUpAt: new Date().toISOString(),
+      }), { expirationTtl: 60 * 60 * 24 * 7 })
+    }
+  } catch (e) {
+    // 백업 실패해도 본 작업은 진행 — 로그만 남김
+    console.warn('[backupRecipients] 백업 실패 (본 작업은 계속)', e)
+  }
+}
+
+/** 전체 수신자 목록 조회 */
 app.get('/api/admin/recipients', async (c) => {
   const list = await loadRecipients(c.env)
   return c.json({ recipients: list })
 })
 
+/** 수신자 신규 등록 */
 app.post('/api/admin/recipients', async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const email = String(body.email ?? '').trim().toLowerCase()
@@ -1199,37 +1272,302 @@ app.post('/api/admin/recipients', async (c) => {
     return c.json({ error: '이미 등록된 이메일입니다.' }, 409)
   }
 
+  await backupRecipients(c.env, list)
+
   const newItem: EmailRecipient = {
     id: 'r_' + Date.now().toString(36),
     email,
     label: label || undefined,
     enabled: true,
     createdAt: new Date().toISOString(),
+    sentCount: 0,
+    failedCount: 0,
   }
   list.push(newItem)
   await saveRecipients(c.env, list)
   return c.json({ ok: true, recipient: newItem })
 })
 
+/** 수신자 삭제 */
 app.delete('/api/admin/recipients/:id', async (c) => {
   const id = c.req.param('id')
   const list = await loadRecipients(c.env)
   const next = list.filter((r) => r.id !== id)
   if (next.length === list.length) return c.json({ error: 'not found' }, 404)
+  await backupRecipients(c.env, list)
   await saveRecipients(c.env, next)
   return c.json({ ok: true })
 })
 
+/**
+ * (v2.2.7) 수신자 편집 — email, label, enabled 모두 수정 가능
+ * - email 변경 시 중복 체크 (자기 자신 제외)
+ * - 이메일 형식 검증
+ * - 변경 시 updatedAt 갱신
+ */
 app.patch('/api/admin/recipients/:id', async (c) => {
   const id = c.req.param('id')
   const body = await c.req.json().catch(() => ({}))
   const list = await loadRecipients(c.env)
   const target = list.find((r) => r.id === id)
   if (!target) return c.json({ error: 'not found' }, 404)
-  if (typeof body.enabled === 'boolean') target.enabled = body.enabled
-  if (typeof body.label === 'string') target.label = body.label.trim() || undefined
+
+  let changed = false
+
+  // 이메일 변경
+  if (typeof body.email === 'string') {
+    const newEmail = body.email.trim().toLowerCase()
+    if (!newEmail) return c.json({ error: '이메일 주소는 비울 수 없습니다.' }, 400)
+    if (!isValidEmail(newEmail)) return c.json({ error: '올바른 이메일 주소 형식이 아닙니다.' }, 400)
+    if (newEmail !== target.email.toLowerCase()) {
+      // 중복 체크 (자기 자신 제외)
+      if (list.some((r) => r.id !== id && r.email.toLowerCase() === newEmail)) {
+        return c.json({ error: '이미 등록된 이메일입니다.' }, 409)
+      }
+      target.email = newEmail
+      changed = true
+    }
+  }
+
+  // 별명 변경
+  if (typeof body.label === 'string') {
+    const newLabel = body.label.trim() || undefined
+    if (newLabel !== target.label) {
+      target.label = newLabel
+      changed = true
+    }
+  }
+
+  // 활성/비활성 토글
+  if (typeof body.enabled === 'boolean' && body.enabled !== target.enabled) {
+    target.enabled = body.enabled
+    changed = true
+  }
+
+  if (changed) {
+    target.updatedAt = new Date().toISOString()
+    await backupRecipients(c.env, list)
+    await saveRecipients(c.env, list)
+  }
+  return c.json({ ok: true, recipient: target, changed })
+})
+
+/**
+ * (v2.2.7) 일괄 작업 — 여러 수신자에 대해 한 번에 enable/disable/delete
+ * Body: { ids: string[], action: 'enable'|'disable'|'delete' }
+ */
+app.post('/api/admin/recipients/bulk', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const ids = Array.isArray(body.ids) ? body.ids.map((x: any) => String(x)) : []
+  const action = String(body.action ?? '')
+
+  if (ids.length === 0) return c.json({ error: 'ids 배열이 비어있습니다.' }, 400)
+  if (!['enable', 'disable', 'delete'].includes(action)) {
+    return c.json({ error: `지원하지 않는 action: ${action}` }, 400)
+  }
+
+  const list = await loadRecipients(c.env)
+  await backupRecipients(c.env, list)
+
+  let affected = 0
+  if (action === 'delete') {
+    const next = list.filter((r) => {
+      if (ids.includes(r.id)) { affected++; return false }
+      return true
+    })
+    await saveRecipients(c.env, next)
+    return c.json({ ok: true, action, affected })
+  }
+
+  // enable / disable
+  const targetEnabled = action === 'enable'
+  for (const r of list) {
+    if (ids.includes(r.id) && r.enabled !== targetEnabled) {
+      r.enabled = targetEnabled
+      r.updatedAt = new Date().toISOString()
+      affected++
+    }
+  }
   await saveRecipients(c.env, list)
-  return c.json({ ok: true, recipient: target })
+  return c.json({ ok: true, action, affected })
+})
+
+/**
+ * (v2.2.7) 수신자 Export — JSON 다운로드
+ *   Content-Disposition attachment 로 파일 다운로드 유도
+ */
+app.get('/api/admin/recipients/export', async (c) => {
+  const list = await loadRecipients(c.env)
+  const today = new Date().toISOString().slice(0, 10)
+  const filename = `recipients_${today}.json`
+  const payload = {
+    schema: 'msaic-recipients-v1',
+    exportedAt: new Date().toISOString(),
+    count: list.length,
+    recipients: list,
+  }
+  return new Response(JSON.stringify(payload, null, 2), {
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    },
+  })
+})
+
+/**
+ * (v2.2.7) 수신자 Import — JSON 업로드로 병합/덮어쓰기
+ * Body: { recipients: EmailRecipient[] | string[], mode: 'merge'|'replace' }
+ *   - mode=merge (기본): 기존에 없는 이메일만 추가 (중복은 건너뜀)
+ *   - mode=replace: 기존 목록 완전 대체 (!위험, 자동 백업 후 수행)
+ *   - recipients 항목은 객체 또는 단순 이메일 문자열 허용
+ */
+app.post('/api/admin/recipients/import', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const mode = String(body.mode ?? 'merge')
+  const raw = Array.isArray(body.recipients) ? body.recipients : []
+  if (!['merge', 'replace'].includes(mode)) {
+    return c.json({ error: `지원하지 않는 mode: ${mode}` }, 400)
+  }
+  if (raw.length === 0) {
+    return c.json({ error: 'recipients 배열이 비어있습니다.' }, 400)
+  }
+
+  // 입력 정규화 — 이메일 문자열 또는 객체 모두 수용
+  const normalized: EmailRecipient[] = []
+  const errors: string[] = []
+  for (const item of raw) {
+    let email = ''
+    let label: string | undefined = undefined
+    let enabled = true
+    let createdAt = new Date().toISOString()
+    if (typeof item === 'string') {
+      email = item.trim().toLowerCase()
+    } else if (item && typeof item === 'object') {
+      email = String(item.email ?? '').trim().toLowerCase()
+      if (typeof item.label === 'string' && item.label.trim()) label = item.label.trim()
+      if (typeof item.enabled === 'boolean') enabled = item.enabled
+      if (typeof item.createdAt === 'string') createdAt = item.createdAt
+    }
+    if (!email || !isValidEmail(email)) {
+      errors.push(`무효 이메일: ${JSON.stringify(item).slice(0, 80)}`)
+      continue
+    }
+    normalized.push({
+      id: 'r_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+      email, label, enabled, createdAt,
+      sentCount: 0, failedCount: 0,
+    })
+  }
+
+  const current = await loadRecipients(c.env)
+  await backupRecipients(c.env, current)
+
+  let added = 0
+  let skipped = 0
+  let result: EmailRecipient[] = []
+
+  if (mode === 'replace') {
+    // 기존 완전 대체 — 중복 이메일만 제거
+    const seen = new Set<string>()
+    for (const r of normalized) {
+      const key = r.email.toLowerCase()
+      if (seen.has(key)) { skipped++; continue }
+      seen.add(key)
+      result.push(r)
+      added++
+    }
+  } else {
+    // merge — 기존 이메일은 건드리지 않고 새 이메일만 추가
+    result = [...current]
+    const existing = new Set(current.map((r) => r.email.toLowerCase()))
+    for (const r of normalized) {
+      const key = r.email.toLowerCase()
+      if (existing.has(key)) { skipped++; continue }
+      existing.add(key)
+      result.push(r)
+      added++
+    }
+  }
+
+  await saveRecipients(c.env, result)
+  return c.json({ ok: true, mode, added, skipped, errors, total: result.length })
+})
+
+/**
+ * (v2.2.7) 백업 목록 조회 — 최근 7일 날짜별 스냅샷 확인
+ */
+app.get('/api/admin/recipients/backups', async (c) => {
+  const prefix = 'recipients:backup:'
+  const listResp = await c.env.SOURCES_KV.list({ prefix })
+  const backups = listResp.keys.map((k) => ({
+    key: k.name,
+    date: k.name.replace(prefix, ''),
+    expiration: k.expiration,
+  }))
+  return c.json({ backups })
+})
+
+/** 특정 날짜 백업 내용 보기 */
+app.get('/api/admin/recipients/backups/:date', async (c) => {
+  const date = c.req.param('date')
+  const key = `recipients:backup:${date}`
+  const data = await c.env.SOURCES_KV.get(key, 'json')
+  if (!data) return c.json({ error: 'not found' }, 404)
+  return c.json({ date, ...(data as any) })
+})
+
+/** 특정 날짜 백업으로 복원 */
+app.post('/api/admin/recipients/backups/:date/restore', async (c) => {
+  const date = c.req.param('date')
+  const key = `recipients:backup:${date}`
+  const data = await c.env.SOURCES_KV.get(key, 'json')
+  if (!data) return c.json({ error: 'not found' }, 404)
+  const snapshot = (data as any).snapshot
+  if (!Array.isArray(snapshot)) return c.json({ error: 'invalid backup' }, 500)
+
+  // 현재 상태를 먼저 백업 (복원 취소용)
+  const current = await loadRecipients(c.env)
+  await backupRecipients(c.env, current)
+
+  await saveRecipients(c.env, snapshot as EmailRecipient[])
+  return c.json({ ok: true, restoredFrom: date, count: snapshot.length })
+})
+
+/**
+ * (v2.2.7) 발송 이력 이벤트 기록 — Python 메일 모듈이 호출
+ * Body: { events: Array<{email, success, reason?, sentAt}> }
+ * 공개 API 이지만 BRIEFING_READ_TOKEN 으로 보호 (checkBearer)
+ */
+app.post('/api/public/recipient-events', async (c) => {
+  if (!checkBearer(c)) return c.json({ error: 'unauthorized' }, 401)
+  const body = await c.req.json().catch(() => ({}))
+  const events = Array.isArray(body.events) ? body.events : []
+  if (events.length === 0) return c.json({ ok: true, updated: 0 })
+
+  const list = await loadRecipients(c.env)
+  let updated = 0
+  for (const ev of events) {
+    const email = String(ev.email ?? '').trim().toLowerCase()
+    if (!email) continue
+    const target = list.find((r) => r.email.toLowerCase() === email)
+    if (!target) continue
+    const now = String(ev.sentAt ?? new Date().toISOString())
+    target.lastAttemptAt = now
+    if (ev.success) {
+      target.lastSentAt = now
+      target.sentCount = (target.sentCount ?? 0) + 1
+    } else {
+      target.lastFailedAt = now
+      target.lastFailedReason = String(ev.reason ?? 'unknown').slice(0, 200)
+      target.failedCount = (target.failedCount ?? 0) + 1
+    }
+    updated++
+  }
+  if (updated > 0) {
+    // 발송 이벤트는 백업 불필요 — 통계 필드만 업데이트
+    await c.env.SOURCES_KV.put(KV_KEY_RECIPIENTS, JSON.stringify(list))
+  }
+  return c.json({ ok: true, updated })
 })
 
 // ═════════════════════════════════════════════════════════════
@@ -1266,7 +1604,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2.6' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2.7' })
 )
 
 export default app
