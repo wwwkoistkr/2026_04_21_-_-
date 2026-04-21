@@ -1,5 +1,5 @@
 /**
- * Morning Stock AI — Service Worker v2.2
+ * Morning Stock AI — Service Worker v2.2.2
  * ─────────────────────────────────────
  * - App shell cache (정적 파일)
  * - admin.js: 네트워크 우선 (최신 코드 강제 적용)
@@ -7,7 +7,7 @@
  * - 로그인 만료 시 자동 리다이렉트
  * - 버전 업데이트 시 기존 캐시 자동 삭제 + 클라이언트 즉시 새로고침
  */
-const CACHE_VERSION = 'msaic-v2.2.0'
+const CACHE_VERSION = 'msaic-v2.2.2'
 const APP_SHELL = [
   '/static/style.css',
   '/static/manifest.json',

@@ -2,6 +2,50 @@
 
 /* Tailwind 가 로드되므로 여기서는 Tailwind 로 표현하기 번거로운 것들만 */
 
+/* ─────────────────────────────────────────────
+   🔴 [v2.2.2 핵심 수정] 모달 표시/숨김 컨트롤
+   ─────────────────────────────────────────────
+   Tailwind `hidden` 클래스 (display:none) 는
+   `sm:flex` 같은 미디어쿼리 규칙보다 specificity 가 낮아
+   PC 해상도에서 오버라이드되어 모달이 항상 보이는 버그가 있음.
+   → !important 와 all-media 적용으로 완전 차단.
+   ─────────────────────────────────────────────*/
+.modal-hidden,
+.modal-hidden[class] {
+  display: none !important;
+}
+
+.modal-visible,
+.modal-visible[class] {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 모바일 모달 풀스크린 (sm 이하) */
+@media (max-width: 639px) {
+  .modal-visible {
+    padding: 0 !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+  }
+  .modal-visible > div:first-child {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* 토스트도 동일한 패턴 보호 */
+.toast-hidden {
+  display: none !important;
+}
+.toast-visible {
+  display: block !important;
+}
+
 body {
   font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Pretendard', -apple-system,
     BlinkMacSystemFont, system-ui, 'Segoe UI', Helvetica, Arial, sans-serif;

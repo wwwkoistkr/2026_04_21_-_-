@@ -9,7 +9,12 @@
  * - 토스트 알림
  * - PC↔모바일 실시간 동기화 (BroadcastChannel + 폴링)
  * - 글로벌 에러 핸들러로 사용자에게 친절한 에러 표시
- * BUILD: 2026-04-21 v2.2.1
+ * BUILD: 2026-04-21 v2.2.2
+ * [v2.2.2] 🔴 CRITICAL FIX: Tailwind hidden vs sm:flex specificity 충돌 해결
+ *   - 모달 HTML 클래스: hidden + sm:flex → modal-hidden
+ *   - showModal/hideModal 헬퍼로 통일
+ *   - toast-hidden/visible 분리
+ *   - CSS에 !important 기반 전용 룰 추가
  */
 
 (function () {
@@ -166,11 +171,12 @@
       warn: 'bg-amber-600',
       error: 'bg-red-600',
     }
-    el.className = 'fixed bottom-6 right-6 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm ' + (palette[type] || palette.info)
+    el.className = 'toast-visible fixed bottom-6 right-6 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm ' + (palette[type] || palette.info)
     el.innerHTML = msg
-    el.classList.remove('hidden')
     clearTimeout(toast._t)
-    toast._t = setTimeout(() => el.classList.add('hidden'), 3000)
+    toast._t = setTimeout(() => {
+      el.className = 'toast-hidden fixed bottom-6 right-6 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm'
+    }, 3000)
   }
 
   function badge(type, enabled) {
@@ -377,13 +383,33 @@
   }
 
   // ═════════════════════════════════════════════════════════════
-  // 편집/추가 모달
+  // 편집/추가 모달 (v2.2.2 - modal-hidden/visible 룰 기반)
   // ═════════════════════════════════════════════════════════════
   const modal = document.getElementById('editModal')
   const modalBody = document.getElementById('modalBody')
   const modalTitle = document.getElementById('modalTitle')
 
+  /**
+   * 모달 표시/숨김 헬퍼 (CSS specificity 충돌 방지).
+   * Tailwind `hidden` 은 미디어쿼리에 약하므로 전용 클래스 사용.
+   */
+  function showModal(el) {
+    if (!el) return
+    el.classList.remove('modal-hidden', 'hidden')
+    el.classList.add('modal-visible')
+  }
+  function hideModal(el) {
+    if (!el) return
+    el.classList.remove('modal-visible')
+    el.classList.add('modal-hidden')
+  }
+
   function openAddModal() {
+    if (!modal || !modalBody) {
+      console.error('[openAddModal] modal DOM not found')
+      toast('❌ 페이지 로딩 오류 - 새로고침 해주세요', 'error')
+      return
+    }
     editingSource = null
     isEditingModal = true
     if (modalTitle) modalTitle.textContent = '새 소스 추가'
@@ -400,15 +426,21 @@
         enabled: true,
         builtin: false,
       })
-      modal.classList.remove('hidden')
+      showModal(modal)
     } catch (e) {
       console.error('[openAddModal] render failed:', e)
+      hideModal(modal)
       toast('❌ 모달 렌더링 실패: ' + (e?.message || e), 'error')
       isEditingModal = false
     }
   }
 
   function openEditModal(source) {
+    if (!modal || !modalBody) {
+      console.error('[openEditModal] modal DOM not found')
+      toast('❌ 페이지 로딩 오류 - 새로고침 해주세요', 'error')
+      return
+    }
     if (!source || typeof source !== 'object') {
       console.error('[openEditModal] invalid source:', source)
       toast('❌ 소스 데이터를 찾을 수 없습니다. 새로고침해주세요.', 'error')
@@ -419,16 +451,17 @@
     if (modalTitle) modalTitle.textContent = `편집 — ${source.label || '(이름없음)'}`
     try {
       renderModalBody(source)
-      modal.classList.remove('hidden')
+      showModal(modal)
     } catch (e) {
       console.error('[openEditModal] render failed for:', source, e)
+      hideModal(modal)
       toast('❌ 편집 모달 오류: ' + (e?.message || e), 'error')
       isEditingModal = false
     }
   }
 
   function closeModal() {
-    modal.classList.add('hidden')
+    hideModal(modal)
     editingSource = null
     isEditingModal = false
   }
@@ -850,12 +883,17 @@
 
   function showConfirm(title, body, onOk) {
     const m = document.getElementById('confirmModal')
+    if (!m) {
+      console.error('[showConfirm] confirmModal not found - falling back to native confirm')
+      if (window.confirm(title + '\n' + body.replace(/<[^>]+>/g, ''))) onOk()
+      return
+    }
     document.getElementById('confirmTitle').textContent = title
     document.getElementById('confirmBody').innerHTML = body
-    m.classList.remove('hidden')
+    showModal(m)
     const okBtn = document.getElementById('btnConfirmOk')
     const cancelBtn = document.getElementById('btnConfirmCancel')
-    const close = () => m.classList.add('hidden')
+    const close = () => hideModal(m)
     const handler = () => {
       close()
       okBtn.removeEventListener('click', handler)
@@ -1146,7 +1184,7 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.2 초기화 중…')
+  console.log('[MorningStock] Admin v2.2.2 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
