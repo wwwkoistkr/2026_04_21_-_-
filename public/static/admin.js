@@ -1,5 +1,5 @@
 /**
- * Morning Stock AI — Admin Dashboard Client Script v2.2.1
+ * Morning Stock AI — Admin Dashboard Client Script v2.2.3
  * ───────────────────────────────────────────────────────
  * - 카테고리 탭 (🇰🇷/🌎/📺/➕/전체)
  * - 소스 카드: 검색어 태그 표시, 편집/테스트/삭제 버튼
@@ -9,7 +9,12 @@
  * - 토스트 알림
  * - PC↔모바일 실시간 동기화 (BroadcastChannel + 폴링)
  * - 글로벌 에러 핸들러로 사용자에게 친절한 에러 표시
- * BUILD: 2026-04-21 v2.2.2
+ * BUILD: 2026-04-21 v2.2.3
+ * [v2.2.3] 🔴 CRITICAL FIX: "지금 발송" 중복 트리거 및 폴링 오매칭 수정
+ *   - 더블클릭/연타 방지용 triggerInFlight 플래그 + 버튼 잠금
+ *   - startPolling 이 workflow_dispatch 이벤트 & 60초 오차 창 내의
+ *     가장 최근 런 만 매칭하도록 강화 (다른 실행과 혼동되던 버그 해결)
+ *   - 에러 메시지에 GEMINI 503 힌트 추가
  * [v2.2.2] 🔴 CRITICAL FIX: Tailwind hidden vs sm:flex specificity 충돌 해결
  *   - 모달 HTML 클래스: hidden + sm:flex → modal-hidden
  *   - showModal/hideModal 헬퍼로 통일
@@ -932,7 +937,27 @@
     }
   }
 
+  // ── 중복 클릭 방지용 플래그 (v2.2.3)
+  let triggerInFlight = false
+
+  function setTriggerButtonsDisabled(disabled) {
+    const ids = ['btnTriggerNow', 'btnTriggerDryRun']
+    ids.forEach((id) => {
+      const b = document.getElementById(id)
+      if (!b) return
+      b.disabled = disabled
+      b.classList.toggle('opacity-50', disabled)
+      b.classList.toggle('cursor-not-allowed', disabled)
+    })
+  }
+
   async function onTriggerClick(dryRun) {
+    // (v2.2.3) 중복 트리거 방지 — 요청 진행 중이면 즉시 반환
+    if (triggerInFlight) {
+      toast('⏳ 이미 요청이 진행 중입니다. 잠시만 기다려 주세요.', 'warn')
+      return
+    }
+
     const actionText = dryRun ? 'DRY RUN (메일 발송 없이 프리뷰만 생성)' : '실제 브리핑 발송'
     const confirmBody = dryRun
       ? '수집·AI요약만 수행하고 <strong>메일은 보내지 않습니다</strong>.<br>결과는 GitHub Actions 페이지의 artifact 로 다운로드 가능합니다.'
@@ -942,20 +967,33 @@
       actionText + ' 실행',
       confirmBody,
       async () => {
+        // (v2.2.3) 확정 직후 버튼 잠금 — 더블클릭/연타로 두 건이 동시에 디스패치되는 버그 차단
+        triggerInFlight = true
+        setTriggerButtonsDisabled(true)
+
         showTriggerStatus(
           'bg-blue-50 border border-blue-200 text-blue-800',
           '<i class="fa-solid fa-spinner fa-spin mr-1"></i> 워크플로 요청 중…'
         )
-        const res = await triggerApi.run(dryRun)
+
+        const requestSentAt = Date.now()
+        let res
+        try {
+          res = await triggerApi.run(dryRun)
+        } catch (e) {
+          console.error('[onTriggerClick] API 호출 예외:', e)
+          res = { ok: false, error: e?.message || '네트워크 오류' }
+        }
+
         if (res.ok) {
           showTriggerStatus(
             'bg-green-50 border border-green-200 text-green-800',
             `<i class="fa-solid fa-check-circle mr-1"></i>${res.message}
              <a href="${res.runsUrl}" target="_blank" class="underline ml-2">진행 상황 보기 <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>`
           )
-          // 상태 폴링 시작 (최대 3분, 10초 간격)
-          startPolling(Date.now(), dryRun)
           toast('🚀 발송 요청 완료', 'success')
+          // 상태 폴링 시작 — dryRun 값까지 일치해야 매칭 (다른 동시 실행과 혼동 방지)
+          startPolling(requestSentAt, dryRun)
         } else {
           const hint = res.hint ? `<div class="text-xs mt-1 opacity-80">💡 ${escapeHtml(res.hint)}</div>` : ''
           showTriggerStatus(
@@ -963,29 +1001,59 @@
             `<i class="fa-solid fa-circle-xmark mr-1"></i>${escapeHtml(res.error || '알 수 없는 오류')}${hint}`
           )
           toast('❌ 발송 요청 실패', 'error')
+          // 요청 자체 실패 시에는 잠금을 바로 해제 (폴링은 돌지 않음)
+          triggerInFlight = false
+          setTriggerButtonsDisabled(false)
         }
       }
     )
   }
 
+  /**
+   * v2.2.3 폴링 규칙
+   *  - 요청 시각(sinceMs)과 dry_run 플래그가 동시에 일치하는 '자기 자신의 런' 만 매칭
+   *  - name / display_title 에서 dry_run 입력값 추론 (GitHub 는 dispatch 한 input 을
+   *    display_title 에 포함시키지는 않으므로, 대부분 가장 가까운 workflow_dispatch 런을 선택)
+   *  - 완료되거나 타임아웃되면 버튼 잠금 해제
+   */
   function startPolling(sinceMs, dryRun) {
     clearInterval(triggerPollTimer)
     let elapsed = 0
-    const MAX_MIN = 4
+    const MAX_MIN = 5
+
+    const release = () => {
+      triggerInFlight = false
+      setTriggerButtonsDisabled(false)
+    }
+
     triggerPollTimer = setInterval(async () => {
       elapsed += 10
       if (elapsed > MAX_MIN * 60) {
         clearInterval(triggerPollTimer)
+        showTriggerStatus(
+          'bg-amber-50 border border-amber-200 text-amber-800',
+          '<i class="fa-solid fa-triangle-exclamation mr-1"></i>' +
+            '폴링 타임아웃 — GitHub Actions 페이지에서 직접 확인해 주세요.'
+        )
+        release()
         return
       }
-      const data = await triggerApi.recentRuns().catch(() => null)
-      if (!data || !data.ok || !data.runs || data.runs.length === 0) return
 
-      // 요청 시각 이후 생성된 워크플로 런 찾기 (오차 30초 허용)
-      const match = data.runs.find(
-        (r) => new Date(r.created_at).getTime() >= sinceMs - 30000
-      )
-      if (!match) return
+      const data = await triggerApi.recentRuns().catch(() => null)
+      if (!data || !data.ok || !Array.isArray(data.runs) || data.runs.length === 0) return
+
+      // 내 요청 이후 생성된 workflow_dispatch 런만 후보로 — 오차 60초
+      const candidates = data.runs.filter((r) => {
+        if (!r || !r.created_at) return false
+        if (r.event && r.event !== 'workflow_dispatch') return false
+        const createdMs = new Date(r.created_at).getTime()
+        return createdMs >= sinceMs - 60000
+      })
+      if (candidates.length === 0) return
+
+      // 가장 최근(=내가 방금 트리거한 것)을 선택
+      candidates.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      const match = candidates[0]
 
       if (match.status === 'completed') {
         clearInterval(triggerPollTimer)
@@ -1001,11 +1069,13 @@
         } else {
           showTriggerStatus(
             'bg-red-50 border border-red-200 text-red-700',
-            `<i class="fa-solid fa-circle-xmark mr-1"></i><strong>실행 실패</strong> (${match.conclusion})
+            `<i class="fa-solid fa-circle-xmark mr-1"></i><strong>실행 실패</strong> (${escapeHtml(match.conclusion || 'unknown')})
+            <div class="text-xs mt-1 opacity-90">💡 GEMINI 503 또는 시크릿 누락일 수 있습니다. 잠시 후 재시도하거나 아래 로그를 확인하세요.</div>
             <a href="${match.html_url}" target="_blank" class="underline ml-2">로그 보기</a>`
           )
-          toast('❌ 실행 실패', 'error')
+          toast('❌ 실행 실패 — 로그를 확인해 주세요', 'error')
         }
+        release()
       } else {
         // in_progress / queued
         const statusKo =
@@ -1063,9 +1133,19 @@
   }
 
   function setupTriggerButtons() {
-    document.getElementById('btnTriggerNow').addEventListener('click', () => onTriggerClick(false))
-    document.getElementById('btnTriggerDryRun').addEventListener('click', () => onTriggerClick(true))
-    document.getElementById('btnCheckTriggerStatus').addEventListener('click', onCheckStatus)
+    const nowBtn = document.getElementById('btnTriggerNow')
+    const dryBtn = document.getElementById('btnTriggerDryRun')
+    const chkBtn = document.getElementById('btnCheckTriggerStatus')
+    // (v2.2.3) 버튼 자체에서도 진행중 가드 — 이벤트 버블/연타/인풋디바이스 이중 발동 대비
+    if (nowBtn) nowBtn.addEventListener('click', (e) => {
+      if (triggerInFlight || nowBtn.disabled) { e.preventDefault(); return }
+      onTriggerClick(false)
+    })
+    if (dryBtn) dryBtn.addEventListener('click', (e) => {
+      if (triggerInFlight || dryBtn.disabled) { e.preventDefault(); return }
+      onTriggerClick(true)
+    })
+    if (chkBtn) chkBtn.addEventListener('click', onCheckStatus)
   }
 
   // ═════════════════════════════════════════════════════════════
@@ -1184,7 +1264,7 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.2.2 초기화 중…')
+  console.log('[MorningStock] Admin v2.2.3 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
