@@ -46,7 +46,7 @@ const KV_KEY_SOURCES = 'sources:v1'        // 사용자 추가 소스 리스트
 const KV_KEY_RECIPIENTS = 'recipients:v1'  // 이메일 수신자 리스트
 const SESSION_COOKIE = 'msaic_session'     // 관리자 세션 쿠키
 const SESSION_TTL_SEC = 60 * 60 * 12       // 12시간
-const DEFAULT_RECIPIENT = 'koist.kr@gmail.com'  // 초기 기본 수신자
+const DEFAULT_RECIPIENT = 'wwwkoistkr@gmail.com'  // 초기 기본 수신자
 
 function getSession(c: any): string | undefined {
   return getCookie(c, SESSION_COOKIE)
@@ -79,7 +79,7 @@ async function saveSources(env: Bindings, list: NewsSource[]): Promise<void> {
 async function loadRecipients(env: Bindings): Promise<EmailRecipient[]> {
   const raw = await env.SOURCES_KV.get(KV_KEY_RECIPIENTS, 'json')
   if (!raw) {
-    // 최초 1회 기본 수신자 (koist.kr@gmail.com) 자동 등록
+    // 최초 1회 기본 수신자 (wwwkoistkr@gmail.com) 자동 등록
     const seed: EmailRecipient[] = [
       {
         id: 'r_default',
@@ -242,7 +242,7 @@ app.get('/', (c) => {
             id="recipientEmail"
             type="email"
             required
-            placeholder="이메일 주소 (예: koist.kr@gmail.com)"
+            placeholder="이메일 주소 (예: wwwkoistkr@gmail.com)"
             class="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
           <input

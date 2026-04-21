@@ -1,6 +1,6 @@
 # 🎯 Morning Stock AI Briefing Center — 운영 설정 가이드
 
-> **목표**: 매일 아침 **08:00 KST** 에 `koist.kr@gmail.com` 으로 주식·반도체 브리핑 메일이 **자동 도착** 하도록 설정합니다.
+> **목표**: 매일 아침 **08:00 KST** 에 `wwwkoistkr@gmail.com` 으로 주식·반도체 브리핑 메일이 **자동 도착** 하도록 설정합니다.
 
 이 가이드는 **사용자가 직접 해야 하는 작업만** 정리한 체크리스트입니다.
 모든 항목은 약 **10~15분** 안에 끝낼 수 있습니다.
@@ -76,9 +76,9 @@
 | # | Secret 이름 | 값 |
 |:-:|---|---|
 | 1 | `GEMINI_API_KEY` | 위 2단계에서 발급받은 `AIza...` |
-| 2 | `EMAIL_SENDER` | `koist.kr@gmail.com` |
+| 2 | `EMAIL_SENDER` | `wwwkoistkr@gmail.com` |
 | 3 | `EMAIL_APP_PASSWORD` | 위 1단계의 **16자리** (공백 제거) |
-| 4 | `EMAIL_RECIPIENTS` | `koist.kr@gmail.com` |
+| 4 | `EMAIL_RECIPIENTS` | `wwwkoistkr@gmail.com` |
 
 > ✅ 위 4개만 등록하면 **매일 아침 08:00 KST** 브리핑이 자동 발송됩니다.
 
@@ -98,7 +98,7 @@
 2. 왼쪽 목록에서 `Daily Stock & Semiconductor Briefing` 선택
 3. 오른쪽 **Run workflow** → **Run workflow** 버튼 클릭
 4. ~2분 후 실행 완료 → **초록색 체크** 확인
-5. `koist.kr@gmail.com` 메일함에서 **📊 일일 주식·반도체 브리핑** 이 도착했는지 확인 ✉️
+5. `wwwkoistkr@gmail.com` 메일함에서 **📊 일일 주식·반도체 브리핑** 이 도착했는지 확인 ✉️
 
 > 🎉 **여기까지 되면 완료!** 내일 아침 08:00 부터 자동으로 도착합니다.
 
@@ -171,7 +171,7 @@ A. `.github/workflows/daily_briefing.yml` 의 `cron: '0 23 * * *'` 부분 (UTC 2
 **Q. 받는 사람을 여러 명으로 하고 싶어요.**
 A. `EMAIL_RECIPIENTS` 에 콤마로 구분해서 넣으세요:
 ```
-koist.kr@gmail.com,another@example.com,third@company.com
+wwwkoistkr@gmail.com,another@example.com,third@company.com
 ```
 
 **Q. 새 애널리스트 블로그를 추가하고 싶어요.**

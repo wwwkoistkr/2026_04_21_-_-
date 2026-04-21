@@ -7,7 +7,7 @@
 
 ## 🎯 빠른 시작: **👉 [SETUP_GUIDE.md](./SETUP_GUIDE.md) 를 먼저 읽으세요!**
 
-> 내일 아침 08:00 부터 `koist.kr@gmail.com` 으로 브리핑을 받기 위한
+> 내일 아침 08:00 부터 `wwwkoistkr@gmail.com` 으로 브리핑을 받기 위한
 > **단계별 체크리스트**(약 10분)가 정리되어 있습니다.
 
 ---
@@ -36,7 +36,7 @@
    │     - 한국 3사 + 미국 5개 매체 + 디일렉YT        │
    │     - 사용자 등록 소스 추가 수집                │
    │     - Gemini 2.5 Flash 10개 엄선 + 한국어 번역  │
-   │     - Gmail SMTP 발송 → koist.kr@gmail.com    │
+   │     - Gmail SMTP 발송 → wwwkoistkr@gmail.com    │
    └──────────────────────────────────────────────┘
 ```
 
@@ -86,7 +86,7 @@
 - 🧪 **추가 전 즉석 테스트** 버튼 — 실제 최근 제목 5건 미리보기
 - 🎛️ 활성/비활성 토글, 삭제 한 번에
 - 💾 Cloudflare KV 에 저장 → GitHub 푸시 불필요, 즉시 반영
-- 🌐 최초 접속 시 `koist.kr@gmail.com` 이 기본 수신자로 자동 등록
+- 🌐 최초 접속 시 `wwwkoistkr@gmail.com` 이 기본 수신자로 자동 등록
 
 ---
 
@@ -99,7 +99,7 @@
 | `GEMINI_API_KEY` | Google AI Studio 발급 | ✅ |
 | `EMAIL_SENDER` | 보내는 Gmail 주소 | ✅ |
 | `EMAIL_APP_PASSWORD` | Gmail 앱 비밀번호 16자 | ✅ |
-| `EMAIL_RECIPIENTS` | 받는 이메일 (기본값: `koist.kr@gmail.com`) | ⬜ |
+| `EMAIL_RECIPIENTS` | 받는 이메일 (기본값: `wwwkoistkr@gmail.com`) | ⬜ |
 | `YOUTUBE_API_KEY` | YouTube Data API v3 | ⬜ |
 | `THELEC_YOUTUBE_CHANNEL_ID` | 디일렉 채널 ID 덮어쓰기 | ⬜ |
 | `BRIEFING_ADMIN_API` | Hono 관리 콘솔 URL (예: `https://morning-stock-briefing.pages.dev`) | ⬜ |
@@ -244,7 +244,7 @@ npx wrangler pages deploy dist --project-name morning-stock-briefing
    - **URL**: `https://analyst.example.com/rss` 혹은 유튜브 채널 URL
 4. 🧪 **테스트** 버튼으로 실제 수집 가능 여부 확인
 5. ✅ **추가** 버튼 → 즉시 저장 (다음 날 아침 브리핑부터 반영)
-6. 매일 08:00 KST, `koist.kr@gmail.com` 으로 브리핑 도착 ✉️
+6. 매일 08:00 KST, `wwwkoistkr@gmail.com` 으로 브리핑 도착 ✉️
 
 ---
 
