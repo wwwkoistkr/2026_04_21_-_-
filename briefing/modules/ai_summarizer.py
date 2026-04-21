@@ -92,23 +92,25 @@ def summarize_with_gemini(
     """
     key = api_key or os.getenv("GEMINI_API_KEY")
 
-    # ---- Gemini 우선 시도 ----
+    # ---- Gemini 우선 시도 (google-genai SDK, 설계서 §2.3 준수) ----
     if key:
         try:
-            import google.generativeai as genai
+            from google import genai
+            from google.genai import types as gt
 
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                generation_config={
-                    "temperature": 0.4,
-                    "top_p": 0.9,
-                    "max_output_tokens": 4096,
-                },
-            )
+            client = genai.Client(api_key=key)
             full_prompt = SYSTEM_PROMPT + "\n" + briefing_input_text
             logger.info("Gemini 호출: model=%s, 입력 길이=%d", model_name, len(full_prompt))
-            response = model.generate_content(full_prompt)
+
+            response = client.models.generate_content(
+                model=model_name,
+                contents=full_prompt,
+                config=gt.GenerateContentConfig(
+                    temperature=0.4,
+                    top_p=0.9,
+                    max_output_tokens=4096,
+                ),
+            )
             text = (response.text or "").strip()
             if text:
                 return text
