@@ -1,5 +1,5 @@
 /**
- * Morning Stock AI — Admin Dashboard Client Script v2.2.5
+ * Morning Stock AI — Admin Dashboard Client Script v2.2.6
  * ───────────────────────────────────────────────────────
  * - 카테고리 탭 (🇰🇷/🌎/📺/➕/전체)
  * - 소스 카드: 검색어 태그 표시, 편집/테스트/삭제 버튼
@@ -9,8 +9,8 @@
  * - 토스트 알림
  * - PC↔모바일 실시간 동기화 (BroadcastChannel + 폴링)
  * - 글로벌 에러 핸들러로 사용자에게 친절한 에러 표시
- * BUILD: 2026-04-21 v2.2.5
- * [v2.2.5] 🔴 CRITICAL FIX: 이메일 '발송완료' 오보고 + 로그인화면 복원
+ * BUILD: 2026-04-21 v2.2.6
+ * [v2.2.6] 🔴 CRITICAL FIX: 이메일 '발송완료' 오보고 + 로그인화면 복원
  *   - Python email_sender: sendmail() 거부 수신자 dict 검사 → 일부 실패도 감지
  *   - Gmail 스팸 분류 낮추는 헤더 추가 (Reply-To, List-Unsubscribe, Date)
  *   - BRIEFING_READ_TOKEN 401/403 시 명확한 진단 로그 → 관리UI 수신자 반영 안되는 상황 가시화
@@ -1065,7 +1065,7 @@
       if (match.status === 'completed') {
         clearInterval(triggerPollTimer)
         if (match.conclusion === 'success') {
-          // (v2.2.5) 실제 발송 완료 시 스팸 폴더 확인 안내 - 과거 사용자가
+          // (v2.2.6) 실제 발송 완료 시 스팸 폴더 확인 안내 - 과거 사용자가
           // '워크플로 성공'만 보고 받은메일함에서 못 찾아 "발송 안됨"으로 오해한 버그 대응
           const spamHint = dryRun ? '' :
             '<div class="text-xs mt-2 p-2 bg-white/60 rounded border border-green-300 text-green-900">' +
@@ -1149,7 +1149,7 @@
   }
 
   // ═════════════════════════════════════════════════════════════
-  // 🩺 (v2.2.5) 수신자 동기화 진단 + MailChannels 즉시 테스트
+  // 🩺 (v2.2.6) 수신자 동기화 진단 + MailChannels 즉시 테스트
   //   네이버/다음 수신자에게 메일이 안 가는 문제의 근본 원인(BRIEFING_READ_TOKEN
   //   CF↔GH 불일치)을 즉시 파악하고, 테스트 발송으로 스팸 필터 여부까지 점검.
   // ═════════════════════════════════════════════════════════════
@@ -1429,7 +1429,7 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.2.5 초기화 중…')
+  console.log('[MorningStock] Admin v2.2.6 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()

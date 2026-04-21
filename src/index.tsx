@@ -24,7 +24,7 @@ type Bindings = {
   GITHUB_TRIGGER_TOKEN?: string        // GitHub PAT (repo + workflow 권한) — 지금 발송용
   GITHUB_REPO?: string                 // 예: "wwwkoistkr/2026_04_21_-_-" (기본값 하드코딩)
   GITHUB_WORKFLOW_FILE?: string        // 예: "daily_briefing.yml"
-  // (v2.2.5) MailChannels 기반 테스트 발송용 — Cloudflare 에서 바로 보낼 때 사용
+  // (v2.2.6) MailChannels 기반 테스트 발송용 — Cloudflare 에서 바로 보낼 때 사용
   EMAIL_SENDER?: string                // 발신자 Gmail 주소 (GitHub Secret 과 동일)
   EMAIL_APP_PASSWORD?: string          // 참조용 (Cloudflare Worker 에서는 SMTP 불가)
 }
@@ -72,7 +72,7 @@ const KV_KEY_RECIPIENTS = 'recipients:v1'
 const KV_KEY_LAST_TRIGGER = 'trigger:last'     // "지금 발송" rate-limit 용
 const KV_KEY_SYNC_VERSION = 'sync:version'     // PC ↔ 모바일 실시간 동기화용 카운터
 const SESSION_COOKIE = 'msaic_session'
-// (v2.2.5) 12시간 → 2시간으로 단축. 사용자 요구 "첫 화면에 비밀번호"
+// (v2.2.6) 12시간 → 2시간으로 단축. 사용자 요구 "첫 화면에 비밀번호"
 // 를 만족시키기 위함. 자주 사용하는 사용자는 모바일 PWA에 저장된 비밀번호로
 // 바로 로그인되므로 UX 저하는 미미함.
 const SESSION_TTL_SEC = 60 * 60 * 2            // 2시간
@@ -371,7 +371,7 @@ app.post('/logout', (c) => {
   return c.redirect('/login?logout=1')
 })
 
-// (v2.2.5) GET 요청으로도 로그아웃 가능 — 모바일 PWA 북마크/빠른 실행용
+// (v2.2.6) GET 요청으로도 로그아웃 가능 — 모바일 PWA 북마크/빠른 실행용
 app.get('/logout', (c) => {
   setCookie(c, SESSION_COOKIE, '', { path: '/', maxAge: 0 })
   return c.redirect('/login?logout=1')
@@ -401,7 +401,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.2.5
+                Daily Briefing Admin v2.2.6
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -455,7 +455,7 @@ app.get('/', (c) => {
         </div>
       </section>
 
-      {/* 🩺 (v2.2.5) 수신자 동기화 진단 + MailChannels 직접 테스트 — 네이버 미수신 해결용 */}
+      {/* 🩺 (v2.2.6) 수신자 동기화 진단 + MailChannels 직접 테스트 — 네이버 미수신 해결용 */}
       <section class="bg-gradient-to-br from-sky-50 to-indigo-50 border-2 border-sky-200 rounded-2xl shadow p-4 sm:p-6 mb-6">
         <div class="flex items-start gap-3 sm:gap-4">
           <div class="flex-shrink-0 text-3xl sm:text-4xl pt-1">🩺</div>
@@ -603,7 +603,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2.5</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.2.6</span></p>
         <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -659,7 +659,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="toast-hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js?v=2.2.5"></script>
+      <script src="/static/admin.js?v=2.2.6"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )
@@ -729,7 +729,7 @@ app.get('/api/admin/trigger-status', async (c) => {
 })
 
 /**
- * (v2.2.5) 수신자 동기화 진단 — "왜 이메일이 특정 사람에게만 가는가" 해결용
+ * (v2.2.6) 수신자 동기화 진단 — "왜 이메일이 특정 사람에게만 가는가" 해결용
  *
  * 관리 UI 에 등록된 수신자들이 실제 GitHub Actions 파이프라인에 반영되려면
  * Cloudflare Pages 의 BRIEFING_READ_TOKEN 과 GitHub Secrets 의 BRIEFING_READ_TOKEN
@@ -780,7 +780,7 @@ app.get('/api/admin/diag-recipient-sync', async (c) => {
 })
 
 /**
- * (v2.2.5) SMTP 직접 발송 테스트 — 관리 UI 에서 특정 수신자에게만 테스트 메일
+ * (v2.2.6) SMTP 직접 발송 테스트 — 관리 UI 에서 특정 수신자에게만 테스트 메일
  *  - GitHub Actions 우회 → Cloudflare Worker 에서 직접 발송 (즉시 결과 확인)
  *  - BRIEFING_READ_TOKEN 문제와 무관하게 동작
  *  - 네이버/구글/기타 수신자 도착 여부를 각각 빠르게 점검 가능
@@ -1266,7 +1266,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2.5' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.2.6' })
 )
 
 export default app

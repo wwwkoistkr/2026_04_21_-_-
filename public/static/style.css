@@ -382,3 +382,98 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ─────────────────────────────────────────────
+   🔴 [v2.2.6 CRITICAL FIX] 다크모드 입력란 가시성
+   ─────────────────────────────────────────────
+   증상: OS/브라우저 다크모드에서 input/textarea 배경이 검정으로 렌더링되어
+         입력 텍스트가 보이지 않음 → "입력이 안 된다" 고 오인.
+   원인: Tailwind CDN 기본값은 color-scheme 을 OS 에 맡기는데,
+         user-agent stylesheet 가 다크모드에서 검은 배경을 부여함.
+   해결: 전체 페이지 color-scheme: light 강제 + 모든 input/textarea/select 에
+         명시적으로 흰 배경 + 어두운 글자색 강제 적용.
+   ───────────────────────────────────────────── */
+:root {
+  color-scheme: light;   /* 다크모드 OS 에서도 라이트 UI 유지 */
+}
+
+html, body {
+  background-color: #f3f4f6;  /* gray-100 */
+  color: #111827;              /* gray-900 */
+}
+
+/* 모든 텍스트 입력 요소에 라이트 테마 강제 */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+textarea,
+select {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;   /* iOS Safari 대응 */
+  caret-color: #1d4ed8;                          /* 커서 색상 (blue-700) */
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #9ca3af !important;   /* gray-400 */
+  opacity: 1 !important;       /* Firefox 기본 opacity 0.54 보정 */
+}
+
+/* 포커스 시에도 배경 유지 (자동완성 제안 등) */
+input:focus,
+textarea:focus,
+select:focus {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+/* Chrome autofill 이 연노란 배경을 씌우는 현상 방지 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  -webkit-text-fill-color: #111827 !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* 비활성화된 input 도 회색이지만 읽을 수 있게 */
+input:disabled,
+textarea:disabled,
+select:disabled {
+  background-color: #f3f4f6 !important;  /* gray-100 */
+  color: #6b7280 !important;             /* gray-500 */
+  -webkit-text-fill-color: #6b7280 !important;
+}
+
+/* code 태그도 다크모드에서 배경이 어두워지는 문제 방지 */
+code {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+/* 어두운 배경 위에 있는 code (예: 진단 결과의 검증 명령어) 는 예외 */
+.bg-gray-900 code,
+code.bg-gray-900,
+pre code {
+  background-color: transparent !important;
+  color: inherit !important;
+}
+
+/* 다크모드 미디어 쿼리에서도 명시적으로 라이트 강제 */
+@media (prefers-color-scheme: dark) {
+  html, body {
+    background-color: #f3f4f6 !important;
+    color: #111827 !important;
+  }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  textarea,
+  select {
+    background-color: #ffffff !important;
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af !important;
+  }
+}
