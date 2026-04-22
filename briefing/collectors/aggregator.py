@@ -18,10 +18,12 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Dict, List
 
 from briefing.collectors.custom_sources import collect_custom_sources
 from briefing.collectors.korean_news import collect_korean_news
+from briefing.collectors.run_reporter import RunReporter
 from briefing.collectors.us_news import get_us_news
 
 logger = logging.getLogger(__name__)
@@ -45,17 +47,23 @@ def collect_all_data(
     """
     all_news: List[Dict[str, str]] = []
 
+    # v2.4.0: 수집 진행 상황 리포터 (KV 로 결과 전송)
+    dry_run_flag = os.getenv("DRY_RUN", "").lower() == "true"
+    reporter = RunReporter(dry_run=dry_run_flag)
+    run_error: str = ""
+
     # ── 1) KV 중심 수집 (v2) ────────────────────────────────
     print("\n╔══════════════════════════════════════════════════════╗")
     print("║  📡 KV 소스 수집 (관리 UI v2 스키마)                  ║")
     print("╚══════════════════════════════════════════════════════╝")
     kv_news: List[Dict[str, str]] = []
     try:
-        kv_news = collect_custom_sources(per_source_limit=custom_limit)
+        kv_news = collect_custom_sources(per_source_limit=custom_limit, reporter=reporter)
         print(f"\n🧩 KV 기반 수집 누적: {len(kv_news)}건")
     except Exception as exc:  # noqa: BLE001
         logger.warning("KV 수집 전체 실패: %s", exc)
         print(f"❌ KV 수집 전체 실패 (폴백 모드 진입): {exc}")
+        run_error = f"KV 수집 실패: {exc}"
 
     all_news.extend(kv_news)
 
@@ -94,6 +102,16 @@ def collect_all_data(
         deduped.append(item)
 
     print(f"\n✨ 중복 제거 후 최종: {len(deduped)}건 (원본 {len(all_news)}건)")
+
+    # v2.4.0: 리포터에 최종 결과 전송 (이력 기록)
+    try:
+        reporter.finish_run(
+            final_count_after_dedup=len(deduped),
+            error=run_error or None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("리포터 최종 보고 실패 (무시): %s", exc)
+
     return deduped
 
 

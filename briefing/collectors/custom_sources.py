@@ -35,12 +35,14 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote_plus
 
 import requests
 
 from briefing.collectors.korean_news import get_news_from_rss
+from briefing.collectors.run_reporter import RunReporter
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +102,14 @@ def fetch_custom_sources(
 # ───────────────────────────────────────────────────────────
 # 2) 소스 하나 처리 — v2 스키마 기준
 # ───────────────────────────────────────────────────────────
-def _collect_one_source(src: Dict) -> List[Dict[str, str]]:
-    """v2 스키마의 소스 1건을 수집해 표준 양식 리스트로 반환."""
+def _collect_one_source(
+    src: Dict,
+    reporter: Optional[RunReporter] = None,
+) -> List[Dict[str, str]]:
+    """v2 스키마의 소스 1건을 수집해 표준 양식 리스트로 반환.
+
+    v2.4.0: reporter 가 주어지면 키워드별 진행 상황을 KV 로 보고.
+    """
     label = src.get("label") or "(이름 없음)"
     stype = src.get("type", "rss")
     url = src.get("url", "")
@@ -110,16 +118,28 @@ def _collect_one_source(src: Dict) -> List[Dict[str, str]]:
     default_limit = max(1, min(10, int(src.get("defaultLimit", 5))))
     category = src.get("category", "custom")
     kr = category == "kr" or _is_korean_site(site)
+    source_id = src.get("id", "")
 
     if not src.get("enabled", True):
         return []
 
     results: List[Dict[str, str]] = []
+    keyword_results: List[Dict[str, Any]] = []  # v2.4.0: 검색어별 상세 추적
+    source_started_at = time.time()
 
     try:
         if stype == "google_news":
             if not site:
                 print(f"⚠️  [KV] {label}: site 필드가 없어 google_news 수집 불가 → 스킵")
+                keyword_results.append({
+                    "keyword": "(no-site)",
+                    "target": 0,
+                    "actual": 0,
+                    "elapsed": 0.0,
+                    "status": "skipped",
+                    "error": "site 필드 없음",
+                })
+                _report_source_done(reporter, src, keyword_results, source_started_at)
                 return []
 
             if queries:
@@ -131,42 +151,154 @@ def _collect_one_source(src: Dict) -> List[Dict[str, str]]:
                         continue
                     feed_url = _build_google_news_rss(site, kw, kr=kr)
                     display = f"{label} / {kw}"
+                    kw_started = time.time()
                     try:
                         news = get_news_from_rss(display, feed_url, limit=lm)
                         results.extend(news)
                         print(f"  🔎 [{label}] '{kw}' → {len(news)}건")
+                        kw_elapsed = time.time() - kw_started
+                        actual = len(news)
+                        if actual == 0:
+                            status = "failed"
+                        elif actual < lm:
+                            status = "partial"
+                        else:
+                            status = "ok"
+                        keyword_results.append({
+                            "keyword": kw,
+                            "target": lm,
+                            "actual": actual,
+                            "elapsed": round(kw_elapsed, 2),
+                            "status": status,
+                        })
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("[KV:%s] 검색어 '%s' 실패: %s", label, kw, exc)
                         print(f"  ⚠️  [{label}] '{kw}' 실패: {exc}")
+                        keyword_results.append({
+                            "keyword": kw,
+                            "target": lm,
+                            "actual": 0,
+                            "elapsed": round(time.time() - kw_started, 2),
+                            "status": "failed",
+                            "error": str(exc)[:200],
+                        })
             else:
                 # 검색어 없음 → 사이트 최신 뉴스
                 feed_url = _build_google_news_rss(site, "", kr=kr)
-                news = get_news_from_rss(label, feed_url, limit=default_limit)
-                results.extend(news)
-                print(f"  📰 [{label}] 최신 → {len(news)}건")
+                kw_started = time.time()
+                try:
+                    news = get_news_from_rss(label, feed_url, limit=default_limit)
+                    results.extend(news)
+                    print(f"  📰 [{label}] 최신 → {len(news)}건")
+                    actual = len(news)
+                    status = "ok" if actual == default_limit else ("partial" if actual > 0 else "failed")
+                    keyword_results.append({
+                        "keyword": "(latest)",
+                        "target": default_limit,
+                        "actual": actual,
+                        "elapsed": round(time.time() - kw_started, 2),
+                        "status": status,
+                    })
+                except Exception as exc:  # noqa: BLE001
+                    keyword_results.append({
+                        "keyword": "(latest)",
+                        "target": default_limit,
+                        "actual": 0,
+                        "elapsed": round(time.time() - kw_started, 2),
+                        "status": "failed",
+                        "error": str(exc)[:200],
+                    })
+                    raise
 
         elif stype == "rss":
             if not url:
+                _report_source_done(reporter, src, keyword_results, source_started_at)
                 return []
-            news = get_news_from_rss(label, url, limit=default_limit)
-            results.extend(news)
-            print(f"  📰 [{label}] RSS → {len(news)}건")
+            kw_started = time.time()
+            try:
+                news = get_news_from_rss(label, url, limit=default_limit)
+                results.extend(news)
+                print(f"  📰 [{label}] RSS → {len(news)}건")
+                actual = len(news)
+                status = "ok" if actual == default_limit else ("partial" if actual > 0 else "failed")
+                keyword_results.append({
+                    "keyword": "(rss)",
+                    "target": default_limit,
+                    "actual": actual,
+                    "elapsed": round(time.time() - kw_started, 2),
+                    "status": status,
+                })
+            except Exception as exc:  # noqa: BLE001
+                keyword_results.append({
+                    "keyword": "(rss)",
+                    "target": default_limit,
+                    "actual": 0,
+                    "elapsed": round(time.time() - kw_started, 2),
+                    "status": "failed",
+                    "error": str(exc)[:200],
+                })
+                raise
 
         elif stype == "youtube":
             # v2.3.0: YouTube 수집 제거 - 레거시 KV 데이터 조용히 스킵
             logger.info("[KV:%s] youtube 타입 소스는 v2.3.0에서 제거됨 → 스킵", label)
+            keyword_results.append({
+                "keyword": "(youtube)", "target": 0, "actual": 0,
+                "elapsed": 0.0, "status": "skipped", "error": "v2.3.0에서 제거됨",
+            })
 
         elif stype == "web":
             print(f"  ⏭️  [{label}] 'web' 타입은 현재 미지원 → 스킵")
+            keyword_results.append({
+                "keyword": "(web)", "target": 0, "actual": 0,
+                "elapsed": 0.0, "status": "skipped", "error": "web 타입 미지원",
+            })
 
         else:
             print(f"  ⚠️  [{label}] 알 수 없는 타입 '{stype}' → 스킵")
+            keyword_results.append({
+                "keyword": f"(unknown: {stype})", "target": 0, "actual": 0,
+                "elapsed": 0.0, "status": "skipped", "error": f"알 수 없는 타입 '{stype}'",
+            })
 
     except Exception as exc:  # noqa: BLE001
         logger.warning("[KV:%s] 수집 실패: %s", label, exc)
         print(f"  ❌ [{label}] 수집 실패: {exc}")
+        # keyword_results 가 비어있다면 실패 엔트리 추가
+        if not keyword_results:
+            keyword_results.append({
+                "keyword": "(error)", "target": 0, "actual": 0,
+                "elapsed": round(time.time() - source_started_at, 2),
+                "status": "failed", "error": str(exc)[:200],
+            })
+
+    # v2.4.0: 리포터에 소스 단위 결과 전송 (준실시간)
+    _report_source_done(reporter, src, keyword_results, source_started_at)
 
     return results
+
+
+def _report_source_done(
+    reporter: Optional[RunReporter],
+    src: Dict,
+    keyword_results: List[Dict[str, Any]],
+    started_at: float,
+) -> None:
+    """리포터에 단일 소스 결과 전송 (실패 무해)."""
+    if reporter is None or not reporter.enabled:
+        return
+    try:
+        reporter.record_source(
+            source_id=src.get("id", ""),
+            label=src.get("label", "(이름 없음)"),
+            category=src.get("category", "custom"),
+            source_type=src.get("type", "rss"),
+            site=src.get("site", ""),
+            keyword_results=keyword_results,
+            elapsed_sec=time.time() - started_at,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("리포터 업데이트 실패 (무시): %s", exc)
 
 
 # ───────────────────────────────────────────────────────────
@@ -176,11 +308,13 @@ def collect_custom_sources(
     per_source_limit: int = 3,  # 하위 호환을 위해 유지 (v2 에서는 소스별 queries/limit 사용)
     admin_api: Optional[str] = None,
     read_token: Optional[str] = None,
+    reporter: Optional[RunReporter] = None,  # v2.4.0: 진행 상황 보고
 ) -> List[Dict[str, str]]:
     """KV 에 등록된 모든 활성 소스를 수집해 표준 양식으로 반환.
 
     per_source_limit 파라미터는 v1 하위 호환용입니다.
     v2 에서는 각 소스의 queries/defaultLimit 을 우선 사용합니다.
+    v2.4.0: reporter 가 주어지면 각 소스 처리 직후 KV 로 진행 상황 전송.
     """
     try:
         registered = fetch_custom_sources(admin_api=admin_api, read_token=read_token)
@@ -202,6 +336,11 @@ def collect_custom_sources(
     cat_display = {"kr": "🇰🇷 한국", "us": "🌎 미국", "custom": "➕ 사용자"}
     all_news: List[Dict[str, str]] = []
 
+    # v2.4.0: 리포터 시작 (활성 소스 개수 전달)
+    active_sources = [s for s in registered if s.get("enabled", True)]
+    if reporter is not None and not reporter.run_id:
+        reporter.start_run(total_sources=len(active_sources))
+
     # v2.3.0: 'yt' 카테고리 제외 (YouTube 수집 제거)
     for cat in ("kr", "us", "custom"):
         group = grouped.get(cat, [])
@@ -209,7 +348,7 @@ def collect_custom_sources(
             continue
         print(f"\n── {cat_display.get(cat, cat)} ({len(group)}개 소스) ──")
         for src in group:
-            news = _collect_one_source(src)
+            news = _collect_one_source(src, reporter=reporter)
             all_news.extend(news)
 
     return all_news

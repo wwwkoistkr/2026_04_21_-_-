@@ -20,7 +20,8 @@ import { renderer } from './renderer'
 type Bindings = {
   SOURCES_KV: KVNamespace
   ADMIN_PASSWORD?: string              // 관리자 로그인 비밀번호
-  BRIEFING_READ_TOKEN?: string         // Python 수집기 API 인증 토큰
+  BRIEFING_READ_TOKEN?: string         // Python 수집기 API 인증 토큰 (소스 목록 조회용)
+  BRIEFING_REPORT_TOKEN?: string       // v2.4.0: Python 수집기 → 결과 전송용 인증 토큰
   GITHUB_TRIGGER_TOKEN?: string        // GitHub PAT (repo + workflow 권한) — 지금 발송용
   GITHUB_REPO?: string                 // 예: "wwwkoistkr/2026_04_21_-_-" (기본값 하드코딩)
   GITHUB_WORKFLOW_FILE?: string        // 예: "daily_briefing.yml"
@@ -80,6 +81,11 @@ const KV_KEY_RECIPIENTS = 'recipients:v1'
 const KV_KEY_LAST_TRIGGER = 'trigger:last'     // "지금 발송" rate-limit 용
 const KV_KEY_DRYRUN_HISTORY = 'trigger:dryrun:hist'  // v2.3.2: DRY RUN 시간당 10회 제한용 실행 타임스탬프 배열
 const KV_KEY_SYNC_VERSION = 'sync:version'     // PC ↔ 모바일 실시간 동기화용 카운터
+// v2.4.0: 수집 진행/결과 추적용 키
+const KV_KEY_RUN_PROGRESS = 'runs:in_progress'  // 진행 중 스냅샷 (DRY RUN 폴링용)
+const KV_KEY_LATEST_RUN = 'runs:latest'         // 가장 최근 완료 실행 결과
+const KV_KEY_RUN_HISTORY = 'runs:history'       // 최근 N건 이력 (최대 10건)
+const RUN_HISTORY_MAX = 10
 const SESSION_COOKIE = 'msaic_session'
 // (v2.2.7) 12시간 → 2시간으로 단축. 사용자 요구 "첫 화면에 비밀번호"
 // 를 만족시키기 위함. 자주 사용하는 사용자는 모바일 PWA에 저장된 비밀번호로
@@ -420,7 +426,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.3.2
+                Daily Briefing Admin v2.4.0
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -542,6 +548,103 @@ app.get('/', (c) => {
             <span class="text-gray-400">(GitHub Actions 쿼터 보호)</span>
           </div>
         </div>
+      </section>
+
+      {/* 📊 v2.4.0: 수집 대시보드 — 마지막 실행 결과 + 소스별 건강도 */}
+      <section class="bg-white border border-gray-200 rounded-2xl shadow p-4 sm:p-6 mb-6">
+        <div class="flex items-start justify-between gap-3 mb-4 flex-wrap">
+          <div class="flex items-start gap-3">
+            <div class="flex-shrink-0 text-2xl sm:text-3xl">📊</div>
+            <div>
+              <h2 class="text-base sm:text-lg font-bold text-gray-800">
+                수집 대시보드 — 에이전트 진행 상황
+              </h2>
+              <p class="text-xs sm:text-sm text-gray-600 mt-1">
+                각 사이트별 수집 결과를 표로 확인합니다. 마지막 실행 기준으로 <strong>소스별 건수·상태·소요 시간</strong>을 보여줍니다.
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            {/* Phase 4: DRY-RUN 근실시간 폴링 토글 */}
+            <label class="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none" title="DRY-RUN 실행 중이면 10초마다 부분 결과를 자동 갱신">
+              <input id="dashLiveToggle" type="checkbox" class="w-4 h-4 accent-sky-500" />
+              <i class="fa-solid fa-satellite-dish text-sky-500"></i>
+              <span>실시간</span>
+            </label>
+            <button id="btnDashRefresh"
+              class="touch-target px-3 py-2 bg-white border border-gray-300 text-gray-700 text-xs rounded-lg hover:bg-gray-50 transition"
+              title="지금 새로고침">
+              <i class="fa-solid fa-rotate"></i>
+              <span class="hidden sm:inline ml-1">새로고침</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 상단 요약 카드 (4개) */}
+        <div id="dashSummary" class="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-4">
+          <div class="bg-gradient-to-br from-sky-50 to-blue-50 border border-sky-200 rounded-lg p-3">
+            <div class="text-[10px] sm:text-xs text-sky-700 font-medium uppercase tracking-wide">마지막 실행</div>
+            <div id="dashLastRun" class="text-sm sm:text-base font-bold text-gray-800 mt-1">—</div>
+            <div id="dashLastRunAgo" class="text-[10px] sm:text-xs text-gray-500 mt-0.5">데이터 없음</div>
+          </div>
+          <div class="bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-200 rounded-lg p-3">
+            <div class="text-[10px] sm:text-xs text-emerald-700 font-medium uppercase tracking-wide">수집 건수</div>
+            <div id="dashTotalItems" class="text-lg sm:text-2xl font-bold text-emerald-700 mt-1">—</div>
+            <div id="dashTotalItemsSub" class="text-[10px] sm:text-xs text-gray-500 mt-0.5">목표 대비</div>
+          </div>
+          <div class="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-lg p-3">
+            <div class="text-[10px] sm:text-xs text-amber-700 font-medium uppercase tracking-wide">성공 소스</div>
+            <div id="dashSuccessSources" class="text-lg sm:text-2xl font-bold text-amber-700 mt-1">—</div>
+            <div id="dashSuccessSourcesSub" class="text-[10px] sm:text-xs text-gray-500 mt-0.5">전체 중</div>
+          </div>
+          <div class="bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-3">
+            <div class="text-[10px] sm:text-xs text-purple-700 font-medium uppercase tracking-wide">소요 시간</div>
+            <div id="dashDuration" class="text-lg sm:text-2xl font-bold text-purple-700 mt-1">—</div>
+            <div id="dashDurationSub" class="text-[10px] sm:text-xs text-gray-500 mt-0.5">수집 단계</div>
+          </div>
+        </div>
+
+        {/* DRY-RUN 진행 중 배지 */}
+        <div id="dashLiveBadge" class="hidden mb-3 p-2.5 rounded-lg bg-sky-50 border border-sky-200 text-xs sm:text-sm text-sky-800">
+          <i class="fa-solid fa-satellite-dish mr-1 text-sky-600 animate-pulse"></i>
+          <strong>DRY-RUN 실행 중</strong> — <span id="dashLiveProgressText">소스 수집 대기 중…</span>
+        </div>
+
+        {/* 소스별 테이블 */}
+        <div class="overflow-x-auto -mx-4 sm:mx-0">
+          <table class="min-w-full text-xs sm:text-sm border-collapse">
+            <thead>
+              <tr class="bg-gray-50 border-b border-gray-200 text-gray-600">
+                <th class="py-2 px-2 sm:px-3 text-left font-medium whitespace-nowrap">상태</th>
+                <th class="py-2 px-2 sm:px-3 text-left font-medium">소스</th>
+                <th class="py-2 px-2 sm:px-3 text-left font-medium whitespace-nowrap hidden sm:table-cell">타입</th>
+                <th class="py-2 px-2 sm:px-3 text-right font-medium whitespace-nowrap">수집/목표</th>
+                <th class="py-2 px-2 sm:px-3 text-right font-medium whitespace-nowrap hidden md:table-cell">소요</th>
+                <th class="py-2 px-2 sm:px-3 text-left font-medium hidden lg:table-cell">메모</th>
+              </tr>
+            </thead>
+            <tbody id="dashSourceTableBody">
+              <tr>
+                <td colspan={6} class="py-6 text-center text-gray-400 text-sm">
+                  <i class="fa-solid fa-spinner fa-spin mr-2"></i>
+                  데이터를 불러오는 중…
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* 최근 실행 히스토리 (접기) */}
+        <details class="mt-4 group">
+          <summary class="cursor-pointer text-xs sm:text-sm text-gray-600 hover:text-gray-800 select-none">
+            <i class="fa-solid fa-clock-rotate-left mr-1"></i>
+            최근 실행 이력 (최대 10건)
+            <i class="fa-solid fa-chevron-down ml-1 text-[10px] group-open:rotate-180 transition-transform"></i>
+          </summary>
+          <div id="dashHistoryList" class="mt-3 space-y-2 text-xs sm:text-sm">
+            <div class="text-gray-400 text-center py-3">이력 없음</div>
+          </div>
+        </details>
       </section>
 
       {/* 🩺 (v2.2.7) 수신자 동기화 진단 + MailChannels 직접 테스트 — 네이버 미수신 해결용 */}
@@ -735,7 +838,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.3.2</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.4.0</span></p>
         <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -974,8 +1077,150 @@ app.post('/api/admin/reset-cooldown', async (c) => {
   }
 })
 
+// ═════════════════════════════════════════════════════════════
+// 📊 v2.4.0: 수집 진행/결과 대시보드 API
+// ═════════════════════════════════════════════════════════════
+
+/** Python → Cloudflare 리포터용 Bearer 인증 검사 */
+function checkReportToken(c: any): { ok: boolean; reason?: string } {
+  const expected = c.env.BRIEFING_REPORT_TOKEN
+  if (!expected) {
+    return { ok: false, reason: 'BRIEFING_REPORT_TOKEN 미설정 (Cloudflare Secret 에 등록 필요)' }
+  }
+  const auth = c.req.header('authorization') || ''
+  const m = auth.match(/^Bearer\s+(.+)$/i)
+  if (!m) return { ok: false, reason: 'Authorization 헤더에 Bearer 토큰 필요' }
+  if (m[1] !== expected) return { ok: false, reason: '토큰 불일치' }
+  return { ok: true }
+}
+
+/** 수집 실행 결과 공통 타입 (KV 저장 스키마) */
+interface RunKeywordResult {
+  keyword: string
+  target: number
+  actual: number
+  elapsed: number  // seconds
+  status: 'ok' | 'partial' | 'failed' | 'skipped'
+  error?: string
+}
+interface RunSourceResult {
+  id: string
+  label: string
+  category: string
+  type: string
+  site: string
+  keywords: RunKeywordResult[]
+  totalTarget: number
+  totalActual: number
+  elapsedSec: number
+  status: 'ok' | 'partial' | 'failed' | 'skipped'
+  finishedAt: number
+}
+interface RunProgressRecord {
+  runId: string
+  startedAt: number
+  finishedAt?: number
+  updatedAt?: number
+  durationSec?: number
+  status: 'in_progress' | 'ok' | 'partial' | 'failed' | 'skipped'
+  dryRun: boolean
+  totalSources?: number
+  sources: RunSourceResult[]
+  totalTarget: number
+  totalActual: number
+  finalCountAfterDedup?: number | null
+  error?: string | null
+}
+
 /**
- * (v2.2.7) 수신자 동기화 진단 — "왜 이메일이 특정 사람에게만 가는가" 해결용
+ * v2.4.0: Python 수집기가 소스 처리 직후 부분 결과를 보고 (준실시간).
+ * 인증: Bearer BRIEFING_REPORT_TOKEN
+ * 저장: KV_KEY_RUN_PROGRESS (5분 TTL)
+ */
+app.post('/api/public/record-run-progress', async (c) => {
+  const auth = checkReportToken(c)
+  if (!auth.ok) {
+    return c.json({ ok: false, error: `인증 실패: ${auth.reason}` }, 401)
+  }
+  try {
+    const body = (await c.req.json()) as RunProgressRecord
+    if (!body || !body.runId) {
+      return c.json({ ok: false, error: 'runId 필수' }, 400)
+    }
+    // 5분 TTL 로 진행 중 스냅샷 저장 (DRY RUN 최대 실행 시간의 2~3배)
+    await c.env.SOURCES_KV.put(
+      KV_KEY_RUN_PROGRESS,
+      JSON.stringify(body),
+      { expirationTtl: 300 },
+    )
+    return c.json({ ok: true, runId: body.runId })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/**
+ * v2.4.0: Python 수집기가 수집 완료 후 최종 결과를 보고.
+ * 인증: Bearer BRIEFING_REPORT_TOKEN
+ * 저장: KV_KEY_LATEST_RUN (영구) + KV_KEY_RUN_HISTORY (최근 10건)
+ */
+app.post('/api/public/record-run-result', async (c) => {
+  const auth = checkReportToken(c)
+  if (!auth.ok) {
+    return c.json({ ok: false, error: `인증 실패: ${auth.reason}` }, 401)
+  }
+  try {
+    const body = (await c.req.json()) as RunProgressRecord
+    if (!body || !body.runId) {
+      return c.json({ ok: false, error: 'runId 필수' }, 400)
+    }
+
+    // 최종 결과 저장
+    await c.env.SOURCES_KV.put(KV_KEY_LATEST_RUN, JSON.stringify(body))
+
+    // 이력 갱신 (최대 10건)
+    const histRaw = await c.env.SOURCES_KV.get(KV_KEY_RUN_HISTORY, 'json')
+    const history: RunProgressRecord[] = Array.isArray(histRaw) ? (histRaw as any) : []
+    history.unshift(body)  // 최신이 앞
+    const trimmed = history.slice(0, RUN_HISTORY_MAX)
+    await c.env.SOURCES_KV.put(KV_KEY_RUN_HISTORY, JSON.stringify(trimmed))
+
+    // 진행 중 스냅샷 삭제 (완료됐으므로)
+    await c.env.SOURCES_KV.delete(KV_KEY_RUN_PROGRESS)
+
+    return c.json({ ok: true, runId: body.runId, historyCount: trimmed.length })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/**
+ * v2.4.0: 관리 UI 전용 — 최근 완료 실행 결과 조회.
+ *  inProgress 가 있으면 함께 반환 (DRY RUN 중 표시용)
+ */
+app.get('/api/admin/latest-run', async (c) => {
+  const latest = await c.env.SOURCES_KV.get(KV_KEY_LATEST_RUN, 'json')
+  const inProgress = await c.env.SOURCES_KV.get(KV_KEY_RUN_PROGRESS, 'json')
+  const reportTokenConfigured = !!c.env.BRIEFING_REPORT_TOKEN
+  return c.json({
+    ok: true,
+    latest: latest ?? null,
+    inProgress: inProgress ?? null,
+    reportTokenConfigured,
+    serverTime: Date.now(),
+  })
+})
+
+/** v2.4.0: 최근 N건 이력 */
+app.get('/api/admin/run-history', async (c) => {
+  const n = Math.max(1, Math.min(RUN_HISTORY_MAX, parseInt(c.req.query('n') ?? '10', 10) || 10))
+  const raw = await c.env.SOURCES_KV.get(KV_KEY_RUN_HISTORY, 'json')
+  const history: RunProgressRecord[] = Array.isArray(raw) ? (raw as any).slice(0, n) : []
+  return c.json({ ok: true, count: history.length, history })
+})
+
+/**
+ * v2.2.7 수신자 동기화 진단 — "왜 이메일이 특정 사람에게만 가는가" 해결용
  *
  * 관리 UI 에 등록된 수신자들이 실제 GitHub Actions 파이프라인에 반영되려면
  * Cloudflare Pages 의 BRIEFING_READ_TOKEN 과 GitHub Secrets 의 BRIEFING_READ_TOKEN
@@ -1834,7 +2079,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.3.2' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.4.0' })
 )
 
 export default app

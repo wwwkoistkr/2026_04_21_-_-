@@ -155,6 +155,14 @@
   }
 
   // ═════════════════════════════════════════════════════════════
+  // 📊 v2.4.0: 수집 대시보드 API
+  // ═════════════════════════════════════════════════════════════
+  const dashboardApi = {
+    latest: () => safeFetch('/api/admin/latest-run'),
+    history: () => safeFetch('/api/admin/run-history'),
+  }
+
+  // ═════════════════════════════════════════════════════════════
   // 전역 상태
   // ═════════════════════════════════════════════════════════════
   let allSources = []
@@ -1681,6 +1689,13 @@
           refreshCooldownState()
           // 상태 폴링 시작 — dryRun 값까지 일치해야 매칭 (다른 동시 실행과 혼동 방지)
           startPolling(requestSentAt, dryRun)
+          // v2.4.0: 대시보드 라이브 폴링 자동 활성화 (DRY-RUN 진행 상황 실시간 관찰)
+          try {
+            const live = document.getElementById('dashLiveToggle')
+            if (live && !live.checked) { live.checked = true }
+            // 20초 후부터 폴링 시작 (Python 집계기 시작 시간 확보)
+            setTimeout(() => { refreshDashboard() }, 20000)
+          } catch (_) {}
         } else {
           const hint = res.hint ? `<div class="text-xs mt-1 opacity-80">💡 ${escapeHtml(res.hint)}</div>` : ''
           showTriggerStatus(
@@ -1983,6 +1998,286 @@
     })
   }
 
+  // ═════════════════════════════════════════════════════════════
+  // 📊 v2.4.0: 수집 대시보드 — 렌더링 & 폴링
+  // ═════════════════════════════════════════════════════════════
+  let dashLivePollTimer = null
+  let dashLastRenderKey = null  // 불필요한 재렌더 방지
+
+  function fmtAgo(ts) {
+    if (!ts) return '데이터 없음'
+    const diff = Math.max(0, Date.now() - new Date(ts).getTime())
+    const s = Math.floor(diff / 1000)
+    if (s < 60) return `${s}초 전`
+    const m = Math.floor(s / 60)
+    if (m < 60) return `${m}분 전`
+    const h = Math.floor(m / 60)
+    if (h < 24) return `${h}시간 전`
+    const d = Math.floor(h / 24)
+    return `${d}일 전`
+  }
+
+  function fmtDuration(sec) {
+    if (!sec && sec !== 0) return '—'
+    const s = Math.floor(sec)
+    if (s < 60) return `${s}초`
+    const m = Math.floor(s / 60)
+    const rs = s % 60
+    return `${m}분 ${rs}초`
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return '—'
+    try {
+      const d = new Date(ts)
+      const hh = String(d.getHours()).padStart(2, '0')
+      const mm = String(d.getMinutes()).padStart(2, '0')
+      const MM = String(d.getMonth() + 1).padStart(2, '0')
+      const DD = String(d.getDate()).padStart(2, '0')
+      return `${MM}/${DD} ${hh}:${mm}`
+    } catch { return '—' }
+  }
+
+  // 소스 상태 → 색상 배지
+  function statusBadge(source) {
+    const st = (source && source.status) || 'unknown'
+    const collected = Number(source && source.collected) || 0
+    const target = Number(source && source.target) || 0
+    // 상태 기준: success | partial | failed | in_progress | skipped | unknown
+    let st2 = st
+    if (st2 === 'unknown' || st2 === 'success') {
+      if (target > 0) {
+        const ratio = collected / target
+        if (ratio >= 1) st2 = 'success'
+        else if (ratio >= 0.5) st2 = 'partial'
+        else if (collected === 0) st2 = 'failed'
+        else st2 = 'partial'
+      } else if (collected > 0) st2 = 'success'
+      else st2 = 'unknown'
+    }
+    const MAP = {
+      success:     { cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', icon: 'fa-circle-check', text: '🟢 정상' },
+      partial:     { cls: 'bg-amber-100 text-amber-700 border-amber-200',       icon: 'fa-triangle-exclamation', text: '🟡 부분' },
+      failed:      { cls: 'bg-rose-100 text-rose-700 border-rose-200',           icon: 'fa-circle-xmark', text: '🔴 실패' },
+      in_progress: { cls: 'bg-sky-100 text-sky-700 border-sky-200',              icon: 'fa-spinner fa-spin', text: '⏳ 수집중' },
+      skipped:     { cls: 'bg-gray-100 text-gray-500 border-gray-200',           icon: 'fa-forward', text: '⚪ 건너뜀' },
+      unknown:     { cls: 'bg-gray-100 text-gray-500 border-gray-200',           icon: 'fa-question', text: '❔ 미상' },
+    }
+    const m = MAP[st2] || MAP.unknown
+    return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] sm:text-xs font-medium ${m.cls}">
+      <i class="fa-solid ${m.icon}"></i>${m.text}
+    </span>`
+  }
+
+  function typeBadge(tp) {
+    const t = String(tp || '').toLowerCase()
+    const MAP = {
+      rss:         { cls: 'bg-purple-50 text-purple-700 border-purple-200', text: 'RSS' },
+      google_news: { cls: 'bg-blue-50 text-blue-700 border-blue-200',       text: 'Google News' },
+      youtube:     { cls: 'bg-rose-50 text-rose-700 border-rose-200',       text: 'YouTube' },
+      web:         { cls: 'bg-gray-50 text-gray-700 border-gray-200',       text: 'Web' },
+      kr:          { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', text: '🇰🇷 KR' },
+      us:          { cls: 'bg-indigo-50 text-indigo-700 border-indigo-200',    text: '🇺🇸 US' },
+      custom:      { cls: 'bg-amber-50 text-amber-700 border-amber-200',    text: '커스텀' },
+    }
+    const m = MAP[t] || { cls: 'bg-gray-50 text-gray-600 border-gray-200', text: t || '—' }
+    return `<span class="inline-block px-1.5 py-0.5 rounded border text-[10px] font-medium ${m.cls}">${m.text}</span>`
+  }
+
+  function renderDashSummary(run) {
+    const lastRun = document.getElementById('dashLastRun')
+    const lastRunAgo = document.getElementById('dashLastRunAgo')
+    const totalItems = document.getElementById('dashTotalItems')
+    const totalItemsSub = document.getElementById('dashTotalItemsSub')
+    const successSources = document.getElementById('dashSuccessSources')
+    const successSourcesSub = document.getElementById('dashSuccessSourcesSub')
+    const duration = document.getElementById('dashDuration')
+    const durationSub = document.getElementById('dashDurationSub')
+
+    if (!run) {
+      if (lastRun) lastRun.textContent = '—'
+      if (lastRunAgo) lastRunAgo.textContent = '데이터 없음'
+      if (totalItems) totalItems.textContent = '—'
+      if (totalItemsSub) totalItemsSub.textContent = '—'
+      if (successSources) successSources.textContent = '—'
+      if (successSourcesSub) successSourcesSub.textContent = '—'
+      if (duration) duration.textContent = '—'
+      if (durationSub) durationSub.textContent = '—'
+      return
+    }
+
+    const tot = Number(run.totalCollected ?? 0)
+    const tgt = Number(run.totalTarget ?? 0)
+    const sources = Array.isArray(run.sources) ? run.sources : []
+    const succ = sources.filter((s) => {
+      const c = Number(s.collected) || 0
+      const t = Number(s.target) || 0
+      return s.status === 'success' || (t > 0 ? c >= t : c > 0)
+    }).length
+    const pctItems = tgt > 0 ? Math.round((tot / tgt) * 100) : null
+    const pctSrcs = sources.length > 0 ? Math.round((succ / sources.length) * 100) : null
+
+    if (lastRun) lastRun.textContent = fmtTime(run.finishedAt || run.startedAt)
+    if (lastRunAgo) {
+      const ago = fmtAgo(run.finishedAt || run.startedAt)
+      const mode = run.dryRun ? '🧪 DRY-RUN' : '📧 실제 발송'
+      lastRunAgo.textContent = `${mode} · ${ago}`
+    }
+    if (totalItems) totalItems.textContent = tgt > 0 ? `${tot}/${tgt}` : `${tot}`
+    if (totalItemsSub) totalItemsSub.textContent = pctItems !== null ? `${pctItems}% 달성` : '목표 미설정'
+    if (successSources) successSources.textContent = `${succ}/${sources.length}`
+    if (successSourcesSub) successSourcesSub.textContent = pctSrcs !== null ? `${pctSrcs}% 성공` : '데이터 없음'
+    if (duration) duration.textContent = fmtDuration(run.durationSec)
+    if (durationSub) durationSub.textContent = run.status === 'in_progress' ? '실행 중…' : '수집 완료'
+  }
+
+  function renderDashTable(sources) {
+    const tbody = document.getElementById('dashSourceTableBody')
+    if (!tbody) return
+    if (!sources || !sources.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" class="py-6 text-center text-gray-400 text-sm">
+            <i class="fa-solid fa-inbox mr-2"></i>
+            수집된 소스 데이터가 아직 없습니다. DRY-RUN으로 먼저 실행해 보세요.
+          </td>
+        </tr>`
+      return
+    }
+    const rows = sources.map((s) => {
+      const label = String(s.label || s.id || '—').replace(/</g, '&lt;')
+      const site = s.site ? `<div class="text-[10px] text-gray-400 truncate max-w-[240px]">${String(s.site).replace(/</g, '&lt;')}</div>` : ''
+      const collected = Number(s.collected) || 0
+      const target = Number(s.target) || 0
+      const ratio = target > 0 ? collected / target : (collected > 0 ? 1 : 0)
+      const barColor = ratio >= 1 ? 'bg-emerald-500' : ratio >= 0.5 ? 'bg-amber-500' : (collected === 0 ? 'bg-rose-500' : 'bg-amber-500')
+      const barPct = Math.min(100, Math.round(ratio * 100))
+      const collectedText = target > 0 ? `${collected}/${target}` : `${collected}`
+      const dur = (s.durationSec !== undefined && s.durationSec !== null) ? fmtDuration(s.durationSec) : '—'
+      const note = s.note || s.error || ''
+      const noteCls = s.error ? 'text-rose-600' : 'text-gray-500'
+      return `
+        <tr class="border-b border-gray-100 hover:bg-gray-50">
+          <td class="py-2 px-2 sm:px-3">${statusBadge(s)}</td>
+          <td class="py-2 px-2 sm:px-3">
+            <div class="font-medium text-gray-800 truncate max-w-[220px]">${label}</div>
+            ${site}
+          </td>
+          <td class="py-2 px-2 sm:px-3 hidden sm:table-cell">
+            ${typeBadge(s.type)} ${s.category ? typeBadge(s.category) : ''}
+          </td>
+          <td class="py-2 px-2 sm:px-3 text-right">
+            <div class="font-mono font-semibold text-gray-800">${collectedText}</div>
+            <div class="mt-1 h-1 bg-gray-100 rounded-full overflow-hidden w-20 ml-auto">
+              <div class="h-full ${barColor} transition-all duration-500" style="width:${barPct}%"></div>
+            </div>
+          </td>
+          <td class="py-2 px-2 sm:px-3 text-right font-mono text-xs text-gray-600 hidden md:table-cell">${dur}</td>
+          <td class="py-2 px-2 sm:px-3 text-xs ${noteCls} hidden lg:table-cell">
+            <div class="truncate max-w-[300px]" title="${String(note).replace(/"/g, '&quot;')}">${String(note).replace(/</g, '&lt;') || '—'}</div>
+          </td>
+        </tr>`
+    }).join('')
+    tbody.innerHTML = rows
+  }
+
+  function renderDashHistory(history) {
+    const box = document.getElementById('dashHistoryList')
+    if (!box) return
+    if (!history || !history.length) {
+      box.innerHTML = `<div class="text-gray-400 text-center py-3">이력 없음</div>`
+      return
+    }
+    box.innerHTML = history.slice(0, 10).map((h) => {
+      const t = fmtTime(h.finishedAt || h.startedAt)
+      const ago = fmtAgo(h.finishedAt || h.startedAt)
+      const mode = h.dryRun ? '🧪' : '📧'
+      const total = `${h.totalCollected ?? 0}${h.totalTarget ? '/' + h.totalTarget : ''}`
+      const srcOk = Array.isArray(h.sources)
+        ? h.sources.filter((s) => (s.status === 'success') || (Number(s.collected) > 0 && (!s.target || Number(s.collected) >= Number(s.target)))).length
+        : 0
+      const srcAll = Array.isArray(h.sources) ? h.sources.length : 0
+      const dur = fmtDuration(h.durationSec)
+      const okCls = (h.status === 'failed') ? 'text-rose-600' : (h.status === 'partial' ? 'text-amber-600' : 'text-emerald-600')
+      const okIcon = (h.status === 'failed') ? 'fa-circle-xmark' : (h.status === 'partial' ? 'fa-triangle-exclamation' : 'fa-circle-check')
+      return `
+        <div class="flex items-center gap-2 p-2 rounded-lg border border-gray-100 hover:bg-gray-50 text-xs sm:text-sm">
+          <i class="fa-solid ${okIcon} ${okCls}"></i>
+          <span class="font-mono text-gray-700">${t}</span>
+          <span class="text-gray-400">${ago}</span>
+          <span>${mode}</span>
+          <span class="ml-auto text-gray-600">수집 <strong class="text-gray-800 font-mono">${total}</strong></span>
+          <span class="text-gray-600">소스 <strong class="text-gray-800 font-mono">${srcOk}/${srcAll}</strong></span>
+          <span class="text-gray-500 hidden sm:inline">⏱ ${dur}</span>
+        </div>`
+    }).join('')
+  }
+
+  function updateLiveBadge(run) {
+    const badge = document.getElementById('dashLiveBadge')
+    const txt = document.getElementById('dashLiveProgressText')
+    if (!badge) return
+    if (run && run.status === 'in_progress') {
+      badge.classList.remove('hidden')
+      if (txt) {
+        const sources = Array.isArray(run.sources) ? run.sources : []
+        const done = sources.filter((s) => s.status === 'success' || s.status === 'failed' || s.status === 'partial' || s.status === 'skipped').length
+        const cur = sources.find((s) => s.status === 'in_progress')
+        const curLabel = cur ? `현재: ${cur.label || cur.id || '?'}` : ''
+        txt.textContent = `소스 ${done}/${sources.length} 완료 · 수집 ${run.totalCollected ?? 0}건 ${curLabel ? '· ' + curLabel : ''}`
+      }
+    } else {
+      badge.classList.add('hidden')
+    }
+  }
+
+  async function refreshDashboard() {
+    try {
+      const [latest, history] = await Promise.all([
+        dashboardApi.latest().catch(() => ({ ok: false })),
+        dashboardApi.history().catch(() => ({ ok: false })),
+      ])
+      const run = (latest && latest.ok && latest.run) ? latest.run : null
+      renderDashSummary(run)
+      renderDashTable(run ? (run.sources || []) : [])
+      updateLiveBadge(run)
+      const hist = (history && history.ok && Array.isArray(history.history)) ? history.history : []
+      renderDashHistory(hist)
+      // 자동 폴링 필요 여부 (DRY-RUN 진행 중이면)
+      const live = document.getElementById('dashLiveToggle')
+      if (live && live.checked && run && run.status === 'in_progress') {
+        scheduleDashLivePoll()
+      } else if (run && run.status !== 'in_progress') {
+        stopDashLivePoll()
+      }
+    } catch (e) {
+      console.warn('[Dashboard] refresh failed:', e)
+    }
+  }
+
+  function scheduleDashLivePoll() {
+    stopDashLivePoll()
+    dashLivePollTimer = setTimeout(() => { refreshDashboard() }, 10000)  // 10초
+  }
+  function stopDashLivePoll() {
+    if (dashLivePollTimer) { clearTimeout(dashLivePollTimer); dashLivePollTimer = null }
+  }
+
+  function setupDashboard() {
+    const refreshBtn = document.getElementById('btnDashRefresh')
+    const liveToggle = document.getElementById('dashLiveToggle')
+    if (refreshBtn) refreshBtn.addEventListener('click', () => refreshDashboard())
+    if (liveToggle) liveToggle.addEventListener('change', () => {
+      if (liveToggle.checked) {
+        refreshDashboard()
+      } else {
+        stopDashLivePoll()
+      }
+    })
+    // 초기 로드
+    refreshDashboard()
+  }
+
   function setupTriggerButtons() {
     const nowBtn = document.getElementById('btnTriggerNow')
     const dryBtn = document.getElementById('btnTriggerDryRun')
@@ -2118,15 +2413,16 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.3.0 초기화 중…')
+  console.log('[MorningStock] Admin v2.4.0 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
   setupDiagButtons()
   setupRecipientBulkHandlers()
+  setupDashboard()  // v2.4.0: 수집 대시보드
   loadPresets().then(() => reload())
   reloadRecipients()
   checkTriggerConfig()
   startSyncPolling()
-  console.log('[MorningStock] 초기화 완료. PC↔모바일 실시간 동기화 활성화.')
+  console.log('[MorningStock] 초기화 완료. PC↔모바일 실시간 동기화 + 수집 대시보드 활성화.')
 })()
