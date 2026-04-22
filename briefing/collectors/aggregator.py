@@ -1,12 +1,17 @@
 """
-[2단계 v2] 수집기 통합 함수 (collect_all_data) — KV 중심 우선.
+[2단계 v2.3.0] 수집기 통합 함수 (collect_all_data) — KV 중심 우선.
 
 ## 동작 흐름
 1) 먼저 Cloudflare KV (관리 UI) 에서 활성 소스 목록을 가져와 수집
-   → 이게 기본 경로입니다. 한국/미국/유튜브/사용자 소스가 모두 KV 에 저장돼 있기 때문.
+   → 이게 기본 경로입니다. 한국/미국/사용자 소스가 모두 KV 에 저장돼 있기 때문.
 2) KV 수집 결과가 0건이면 (BRIEFING_ADMIN_API 미설정/네트워크 실패 등)
-   기존 하드코딩 수집기로 폴백 (한국 3사, 미국 매체, 디일렉 유튜브)
+   기존 하드코딩 수집기로 폴백 (한국 3사, 미국 매체)
 3) 두 경로 모두 실패해도 각 try/except 가 독립적이라 서비스 중단 없음.
+
+### v2.3.0 변경
+- YouTube 수집 제거: 3개월간 0건 실적, API 키 관리 부담 대비 가치 낮음
+- 텍스트 뉴스(58건/일)로 충분히 브리핑 품질 유지
+- 필요 시 커스텀 소스로 나중에 재추가 가능 (코드는 git 히스토리에 보존)
 
 지침서 3.2 예외 처리 원칙 유지.
 """
@@ -18,7 +23,6 @@ from typing import Dict, List
 from briefing.collectors.custom_sources import collect_custom_sources
 from briefing.collectors.korean_news import collect_korean_news
 from briefing.collectors.us_news import get_us_news
-from briefing.collectors.youtube_news import get_youtube_news
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +30,15 @@ logger = logging.getLogger(__name__)
 def collect_all_data(
     korean_limit: int = 5,
     us_limit: int = 3,
-    youtube_limit: int = 5,
     custom_limit: int = 3,
+    **_legacy_kwargs,  # v2.2.x 하위 호환 (youtube_limit 등 무시)
 ) -> List[Dict[str, str]]:
     """
     활성화된 모든 소스에서 수집 후 단일 리스트로 반환.
 
-    **우선 전략 (v2)**
+    **우선 전략 (v2.3.0)**
     - 1순위: Cloudflare KV (관리 UI v2 스키마, queries 포함)
-    - 2순위: KV 에서 0건 반환시 하드코딩 폴백 (한국/미국/유튜브)
+    - 2순위: KV 에서 0건 반환시 하드코딩 폴백 (한국/미국)
 
     반환 스키마는 항상 지침서 §3.3 표준 양식:
       {source, title, link, summary}
@@ -78,15 +82,6 @@ def collect_all_data(
         except Exception as exc:  # noqa: BLE001
             logger.warning("폴백 미국 뉴스 실패: %s", exc)
             print(f"❌ (폴백) 미국 뉴스 실패: {exc}")
-
-        # 2-3) 디일렉 유튜브
-        try:
-            y = get_youtube_news(max_results=youtube_limit)
-            all_news.extend(y)
-            print(f"📺 (폴백) 유튜브: {len(y)}건")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("폴백 유튜브 실패: %s", exc)
-            print(f"❌ (폴백) 유튜브 실패: {exc}")
 
     # ── 3) 중복 제거 (동일 링크 기준) ─────────────────────
     deduped: List[Dict[str, str]] = []
