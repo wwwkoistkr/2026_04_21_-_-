@@ -45,13 +45,34 @@ _YT_CHANNEL_RE = re.compile(r"youtube\.com/channel/([A-Za-z0-9_-]+)", re.I)
 _YT_RSS_RE = re.compile(r"youtube\.com/feeds/videos\.xml\?channel_id=([A-Za-z0-9_-]+)", re.I)
 
 
+# v2.2.8: KV 에 seed 로 들어가 있는 잘못된 채널 ID → 실측 채널 ID 로 교정
+# 관리 UI 의 수동 편집 없이도 임시 복구할 수 있도록 함. 장기적으로는 관리 UI 에서
+# URL 을 수정하는 것이 맞지만, seed 데이터가 잘못 배포된 경우의 안전망.
+_YT_CHANNEL_FIXUPS: Dict[str, str] = {
+    # (구) 존재하지 않는 채널 → (신) 실제 @thelec 채널
+    "UC2GRwEADsEKEX5k-Xg9YphA": "UCW45xiXsUy3MJSiZ0zal0aw",
+}
+
+
+def _apply_channel_id_fixup(cid: str) -> str:
+    """KV 에 잘못 저장된 채널 ID 를 런타임에 교정."""
+    fixed = _YT_CHANNEL_FIXUPS.get(cid)
+    if fixed:
+        logger.warning("YouTube 채널 ID 자동 교정: %s → %s (KV 에서 수동 업데이트 권장)", cid, fixed)
+        return fixed
+    return cid
+
+
 def _youtube_url_to_rss(url: str) -> Optional[str]:
-    """YouTube 채널/사용자 URL 을 RSS feed URL 로 정규화."""
-    if _YT_RSS_RE.search(url):
-        return url
+    """YouTube 채널/사용자 URL 을 RSS feed URL 로 정규화 (v2.2.8 채널 ID 교정 포함)."""
+    m = _YT_RSS_RE.search(url)
+    if m:
+        cid = _apply_channel_id_fixup(m.group(1))
+        return f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
     m = _YT_CHANNEL_RE.search(url)
     if m:
-        return f"https://www.youtube.com/feeds/videos.xml?channel_id={m.group(1)}"
+        cid = _apply_channel_id_fixup(m.group(1))
+        return f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
     return None
 
 
@@ -230,36 +251,69 @@ def collect_custom_sources(
 
 
 def _fetch_youtube_rss(label: str, rss_url: str, limit: int = 5) -> List[Dict[str, str]]:
-    """YouTube RSS 전용 수집 (feedparser UA 필요)."""
+    """
+    YouTube RSS 전용 수집 (feedparser UA 필요).
+
+    v2.2.8 강화
+    -----------
+    - 5xx / Timeout / ConnectionError 1 회 재시도
+    - 404 는 재시도 없이 즉시 실패 (잘못된 채널 ID)
+    """
     import feedparser
 
     headers = {
         "User-Agent": "feedparser/6.0 +https://github.com/kurtmckee/feedparser",
         "Accept": "application/atom+xml, application/rss+xml, application/xml;q=0.9",
     }
-    resp = requests.get(rss_url, headers=headers, timeout=15)
-    resp.raise_for_status()
-    feed = feedparser.parse(resp.content)
 
-    out: List[Dict[str, str]] = []
-    for entry in feed.entries[:limit]:
-        title = getattr(entry, "title", "").strip()
-        link = getattr(entry, "link", "").strip()
-        summary = (
-            getattr(entry, "summary", None)
-            or getattr(entry, "description", None)
-            or ""
-        )
-        summary = re.sub(r"<[^>]+>", "", summary).strip()[:300]
-        out.append(
-            {
-                "source": f"{label} (YouTube)",
-                "title": title,
-                "link": link,
-                "summary": summary,
-            }
-        )
-    return out
+    last_exc: Optional[Exception] = None
+    for attempt in range(2):  # 총 2회 (최초 1 + 재시도 1)
+        try:
+            resp = requests.get(rss_url, headers=headers, timeout=15)
+            if resp.status_code == 404:
+                raise RuntimeError(f"HTTP 404 (채널 없음) — {label} (URL: {rss_url})")
+            if 500 <= resp.status_code < 600:
+                # 5xx 는 YouTube 일시 장애일 수 있음 → 재시도
+                raise ConnectionError(f"HTTP {resp.status_code} — YouTube 일시 장애 ({label})")
+            resp.raise_for_status()
+
+            feed = feedparser.parse(resp.content)
+            if not feed.entries:
+                # 404 아닌데 entries=0 → 비활성 채널이거나 최근 업로드 없음
+                logger.info("[%s] YouTube RSS 응답은 받았으나 항목 없음", label)
+                return []
+
+            out: List[Dict[str, str]] = []
+            for entry in feed.entries[:limit]:
+                title = getattr(entry, "title", "").strip()
+                link = getattr(entry, "link", "").strip()
+                summary = (
+                    getattr(entry, "summary", None)
+                    or getattr(entry, "description", None)
+                    or ""
+                )
+                summary = re.sub(r"<[^>]+>", "", summary).strip()[:300]
+                out.append(
+                    {
+                        "source": f"{label} (YouTube)",
+                        "title": title,
+                        "link": link,
+                        "summary": summary,
+                    }
+                )
+            return out
+
+        except (requests.Timeout, ConnectionError, requests.ConnectionError) as exc:
+            last_exc = exc
+            if attempt == 0:
+                logger.info("[%s] 일시 오류(%s), 재시도 중…", label, exc)
+                continue
+            raise RuntimeError(f"YouTube RSS 재시도 실패 — {label}: {exc}") from exc
+
+    # 정상 경로에서 도달 안 함
+    if last_exc:
+        raise RuntimeError(f"YouTube RSS 알 수 없는 오류 — {label}: {last_exc}")
+    return []
 
 
 # ---------------------------------------------------------------------------
