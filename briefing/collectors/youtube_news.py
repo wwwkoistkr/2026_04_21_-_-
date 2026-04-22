@@ -24,14 +24,38 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 설정
 # ---------------------------------------------------------------------------
-# 디일렉(the elec) 공식 유튜브 채널 ID
+# 디일렉(THELEC) 공식 유튜브 채널 ID
 # (채널 URL 에서 확인: https://www.youtube.com/@thelec → channel_id)
-# NOTE: 채널이 여러 개일 수 있으므로 환경변수로 덮어쓸 수 있게 처리
-# 디일렉 THEELEC 공식 유튜브 채널 ID
-#  https://www.youtube.com/channel/UC2GRwEADsEKEX5k-Xg9YphA
-DEFAULT_THELEC_CHANNEL_ID = os.getenv(
-    "THELEC_YOUTUBE_CHANNEL_ID", "UC2GRwEADsEKEX5k-Xg9YphA"
-)
+#
+# v2.2.8 버그 수정 2건:
+#   ❌ 이전 버그 1: os.getenv("THELEC_YOUTUBE_CHANNEL_ID", "UC2...") — 환경변수가
+#      "" (빈 문자열)일 때 기본값 fallback 실패 → 404.
+#   ✅ 현재: 런타임에 읽고 빈 값/공백은 기본값으로 fallback.
+#
+#   ❌ 이전 버그 2: 기본값이 `UC2GRwEADsEKEX5k-Xg9YphA` 였으나 이는 존재하지 않는
+#      채널이라 RSS 404 반환.
+#   ✅ 현재: @thelec 페이지의 HTML 에서 확인한 실제 채널 ID 로 교체
+#      (https://www.youtube.com/@thelec → browseId=UCW45xiXsUy3MJSiZ0zal0aw).
+_HARDCODED_THELEC_CHANNEL_ID = "UCW45xiXsUy3MJSiZ0zal0aw"  # @thelec (THELEC)
+
+
+def _resolve_channel_id(explicit: Optional[str] = None) -> str:
+    """
+    채널 ID 우선순위:
+      1) explicit 인자 (유효한 경우)
+      2) 환경변수 THELEC_YOUTUBE_CHANNEL_ID (공백·빈 값이 아닌 경우)
+      3) 하드코딩된 디일렉 공식 채널 ID
+    """
+    if explicit and explicit.strip():
+        return explicit.strip()
+    env_val = (os.getenv("THELEC_YOUTUBE_CHANNEL_ID") or "").strip()
+    if env_val:
+        return env_val
+    return _HARDCODED_THELEC_CHANNEL_ID
+
+
+# 하위 호환: 이전에 모듈 속성으로 참조되던 이름 유지 (import 시점 1회 평가)
+DEFAULT_THELEC_CHANNEL_ID = _resolve_channel_id()
 
 # YouTube RSS 전용 헤더
 # ── YouTube 는 브라우저 UA 로 RSS 피드를 요청하면 404 를 돌려주는 특성이 있습니다.
@@ -155,8 +179,10 @@ def get_youtube_news(
     max_results : int
         최대 수집 영상 수.
     """
-    channel_id = channel_id or DEFAULT_THELEC_CHANNEL_ID
-    api_key = os.getenv("YOUTUBE_API_KEY")
+    # v2.2.8: 런타임 해석 — 환경변수가 빈 문자열이어도 안전하게 fallback
+    channel_id = _resolve_channel_id(channel_id)
+    api_key = (os.getenv("YOUTUBE_API_KEY") or "").strip() or None
+    logger.info("디일렉 YouTube 수집 채널 ID: %s (API=%s)", channel_id, "ON" if api_key else "OFF")
 
     # 1차 시도: YouTube Data API v3
     if api_key:

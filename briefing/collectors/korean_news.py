@@ -15,7 +15,7 @@ from __future__ import annotations
 import html
 import logging
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import feedparser
 import requests
@@ -98,6 +98,20 @@ DEFAULT_HEADERS = {
 # HTML 태그 제거용 정규식 (summary 안에 섞인 <p>, <img> 등 제거)
 _TAG_RE = re.compile(r"<[^>]+>")
 
+# Cloudflare WAF / 봇 차단 페이지 감지용 시그니처
+# - 한국경제(https://rss.hankyung.com) 등은 Cloudflare 에 보호되어 있어
+#   봇으로 판단되면 HTML 4.5KB 분량의 "Attention Required" 페이지를 돌려줍니다.
+# - 이 경우 Content-Type 이 text/html 이거나 본문에 아래 키워드가 포함됩니다.
+_WAF_SIGNATURES = (
+    b"cf-error",
+    b"Attention Required",
+    b"DDoS protection by Cloudflare",
+    b"Cloudflare Ray ID",
+    b"ray id",
+    b"Access denied",
+    b"Just a moment...",
+)
+
 
 def _clean_summary(raw: str, max_len: int = 300) -> str:
     """RSS 의 description / summary 에서 HTML 태그·공백을 정리하고 길이 제한."""
@@ -109,60 +123,139 @@ def _clean_summary(raw: str, max_len: int = 300) -> str:
     return text[:max_len]
 
 
+def _looks_like_rss(content: bytes, content_type: str) -> bool:
+    """
+    응답이 RSS/Atom XML 처럼 보이는지 휴리스틱으로 판단.
+    Cloudflare WAF 가 403 대신 200 + HTML 페이지를 돌려주는 경우를 잡기 위함.
+    """
+    if not content:
+        return False
+    ct = (content_type or "").lower()
+    if "xml" in ct or "rss" in ct or "atom" in ct:
+        return True
+    # Content-Type 이 누락되어도 본문 앞쪽이 <?xml / <rss / <feed 로 시작하면 OK
+    head = content[:512].lstrip().lower()
+    return (
+        head.startswith(b"<?xml")
+        or head.startswith(b"<rss")
+        or head.startswith(b"<feed")
+    )
+
+
+def _detect_waf_block(content: bytes) -> str:
+    """
+    Cloudflare 등 WAF 차단 페이지인지 감지. 차단 시 사유 문자열 반환, 아니면 빈 문자열.
+    """
+    sample = content[:4096] if content else b""
+    for sig in _WAF_SIGNATURES:
+        if sig in sample:
+            # 어떤 시그니처에 걸렸는지도 함께 반환
+            return f"WAF block detected ({sig.decode('latin-1', errors='ignore')})"
+    return ""
+
+
 def get_news_from_rss(
-    source_name: str, url: str, limit: int = 5, timeout: int = 10
+    source_name: str,
+    url: str,
+    limit: int = 5,
+    timeout: int = 15,
+    retries: int = 2,
 ) -> List[Dict[str, str]]:
     """
     주어진 RSS URL 에서 뉴스를 가져와 표준 dict 리스트로 반환.
 
-    Parameters
-    ----------
-    source_name : str
-        출처 이름(예: "한국경제")
-    url : str
-        RSS 피드 URL
-    limit : int
-        상위 몇 개의 기사를 가져올지 (토큰 절약용, 기본 5)
-    timeout : int
-        HTTP 타임아웃(초)
-
-    Returns
-    -------
-    List[Dict[str, str]]
-        지침서 3.3 의 표준 양식을 지킨 딕셔너리 리스트.
+    v2.2.8 강화 내역
+    ----------------
+    - 타임아웃 10 → 15 초 (한국 서버가 가끔 느림)
+    - ``retries`` 인자 추가: 5xx / 네트워크 오류 시 1 회 재시도
+    - HTTP 상태 코드별 명확한 예외 메시지
+    - Cloudflare 등 WAF 차단 페이지 (200 + HTML) 자동 감지
+    - feedparser bozo 분기 개선: XML 이지만 entries=0 인 경우도 실패 처리
     """
     articles: List[Dict[str, str]] = []
+    last_exc: Optional[Exception] = None
 
-    # 1) requests 로 먼저 받아서 User-Agent 위장 → feedparser 로 파싱
-    #    (feedparser 자체도 URL 직접 파싱이 가능하지만, 일부 서버가 봇을 막으므로
-    #     브라우저 헤더를 붙인 requests 결과를 feedparser 에 넘기는 것이 더 안전)
-    response = requests.get(url, headers=DEFAULT_HEADERS, timeout=timeout)
-    response.raise_for_status()
-    feed = feedparser.parse(response.content)
+    for attempt in range(retries + 1):
+        try:
+            response = requests.get(url, headers=DEFAULT_HEADERS, timeout=timeout)
 
-    if feed.bozo and not feed.entries:
-        # RSS 파싱 자체가 실패한 경우
-        raise RuntimeError(
-            f"RSS 파싱 실패({source_name}): {feed.bozo_exception}"
-        )
+            # 1) HTTP 상태 검증 — 재시도 대상과 즉시 실패 대상 분리
+            if response.status_code == 403:
+                raise RuntimeError(
+                    f"HTTP 403 (WAF/봇 차단) — {source_name} 공식 RSS 접근 거부"
+                )
+            if response.status_code == 404:
+                raise RuntimeError(
+                    f"HTTP 404 (피드 없음) — {source_name} URL 확인 필요"
+                )
+            if 500 <= response.status_code < 600:
+                # 5xx 는 재시도 가치가 있음
+                raise ConnectionError(
+                    f"HTTP {response.status_code} (서버 오류) — {source_name}"
+                )
+            response.raise_for_status()
 
-    for entry in feed.entries[:limit]:
-        title = getattr(entry, "title", "").strip()
-        link = getattr(entry, "link", "").strip()
-        summary_raw = (
-            getattr(entry, "summary", None)
-            or getattr(entry, "description", None)
-            or ""
-        )
-        articles.append(
-            {
-                "source": source_name,
-                "title": title,
-                "link": link,
-                "summary": _clean_summary(summary_raw),
-            }
-        )
+            # 2) Content-Type / 본문 시그니처로 WAF 차단 감지
+            waf_reason = _detect_waf_block(response.content)
+            if waf_reason:
+                raise RuntimeError(f"{waf_reason} — {source_name}")
+            if not _looks_like_rss(
+                response.content, response.headers.get("Content-Type", "")
+            ):
+                raise RuntimeError(
+                    f"비(非) XML 응답 ({len(response.content)} bytes, "
+                    f"Content-Type={response.headers.get('Content-Type', 'N/A')}) "
+                    f"— {source_name}"
+                )
 
+            # 3) 파싱
+            feed = feedparser.parse(response.content)
+            if not feed.entries:
+                # bozo=1 이거나 빈 피드. RSS 로 보여도 내용이 없으면 fallback.
+                reason = (
+                    str(feed.bozo_exception) if feed.bozo else "entries=0"
+                )
+                raise RuntimeError(
+                    f"RSS 파싱됐으나 기사 없음 ({reason}) — {source_name}"
+                )
+
+            for entry in feed.entries[:limit]:
+                title = getattr(entry, "title", "").strip()
+                link = getattr(entry, "link", "").strip()
+                summary_raw = (
+                    getattr(entry, "summary", None)
+                    or getattr(entry, "description", None)
+                    or ""
+                )
+                articles.append(
+                    {
+                        "source": source_name,
+                        "title": title,
+                        "link": link,
+                        "summary": _clean_summary(summary_raw),
+                    }
+                )
+            return articles
+
+        except (requests.Timeout, ConnectionError, requests.ConnectionError) as exc:
+            # 재시도 가치가 있는 일시 오류
+            last_exc = exc
+            if attempt < retries:
+                logger.info(
+                    "[%s] 일시 오류(%s), 재시도 %d/%d",
+                    source_name, exc, attempt + 1, retries,
+                )
+                continue
+            raise RuntimeError(
+                f"네트워크 오류 재시도 실패 — {source_name}: {exc}"
+            ) from exc
+        except Exception:
+            # 그 외(403/WAF/파싱 실패 등)는 즉시 실패 → 상위에서 fallback 사용
+            raise
+
+    # 정상 경로에서는 도달하지 않지만 안전 장치
+    if last_exc:
+        raise RuntimeError(f"알 수 없는 오류 — {source_name}: {last_exc}")
     return articles
 
 

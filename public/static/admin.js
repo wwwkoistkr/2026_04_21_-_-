@@ -1,5 +1,5 @@
 /**
- * Morning Stock AI — Admin Dashboard Client Script v2.2.7
+ * Morning Stock AI — Admin Dashboard Client Script v2.2.8
  * ───────────────────────────────────────────────────────
  * - 카테고리 탭 (🇰🇷/🌎/📺/➕/전체)
  * - 소스 카드: 검색어 태그 표시, 편집/테스트/삭제 버튼
@@ -9,7 +9,7 @@
  * - 토스트 알림
  * - PC↔모바일 실시간 동기화 (BroadcastChannel + 폴링)
  * - 글로벌 에러 핸들러로 사용자에게 친절한 에러 표시
- * BUILD: 2026-04-21 v2.2.7
+ * BUILD: 2026-04-22 v2.2.8
  * [v2.2.7] 🔴 CRITICAL FIX: 이메일 '발송완료' 오보고 + 로그인화면 복원
  *   - Python email_sender: sendmail() 거부 수신자 dict 검사 → 일부 실패도 감지
  *   - Gmail 스팸 분류 낮추는 헤더 추가 (Reply-To, List-Unsubscribe, Date)
@@ -1845,7 +1845,7 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.2.7 초기화 중…')
+  console.log('[MorningStock] Admin v2.2.8 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
