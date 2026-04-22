@@ -319,6 +319,22 @@ async function saveRecipients(env: Bindings, list: EmailRecipient[]): Promise<vo
 app.use(renderer)
 
 // ═════════════════════════════════════════════════════════════
+// (v2.4.0) favicon — 콘솔 404 제거 (PWA 아이콘 재사용)
+// ═════════════════════════════════════════════════════════════
+app.get('/favicon.ico', (c) => c.redirect('/static/icons/favicon-32.png', 302))
+
+// ═════════════════════════════════════════════════════════════
+// (v2.4.0) 편의용 별칭 경로 — 404 방지
+//   /admin, /dashboard, /home 등 흔히 시도하는 경로를 루트로 리다이렉트
+// ═════════════════════════════════════════════════════════════
+app.get('/admin', (c) => c.redirect('/', 302))
+app.get('/admin/', (c) => c.redirect('/', 302))
+app.get('/dashboard', (c) => c.redirect('/', 302))
+app.get('/home', (c) => c.redirect('/', 302))
+app.get('/index', (c) => c.redirect('/', 302))
+app.get('/index.html', (c) => c.redirect('/', 302))
+
+// ═════════════════════════════════════════════════════════════
 // 1) 로그인 화면
 // ═════════════════════════════════════════════════════════════
 app.get('/login', (c) => {
