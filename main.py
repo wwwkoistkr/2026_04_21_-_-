@@ -56,7 +56,14 @@ def run_pipeline() -> int:
     logger = logging.getLogger("briefing.main")
 
     dry_run = _is_truthy(os.getenv("DRY_RUN"))
-    today_str = datetime.now().strftime("%Y-%m-%d (%a)")
+    # v2.4.1: KST 보정 (GitHub Actions UTC → KST +9h)
+    try:
+        from datetime import timezone, timedelta
+        kst = timezone(timedelta(hours=9))
+        now_kst = datetime.now(kst)
+    except Exception:
+        now_kst = datetime.now()
+    today_str = now_kst.strftime("%Y-%m-%d (%a)")
 
     print("=" * 70)
     print(f"📊 일일 브리핑 파이프라인 시작 — {today_str}"
