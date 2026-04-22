@@ -1342,6 +1342,7 @@
   async function checkTriggerConfig() {
     try {
       const s = await triggerApi.status()
+      cooldownState.configured = !!s.configured
       if (!s.configured) {
         showTriggerStatus(
           'bg-amber-50 border border-amber-200 text-amber-800',
@@ -1353,6 +1354,12 @@
         document.getElementById('btnTriggerDryRun').disabled = true
         document.getElementById('btnTriggerNow').classList.add('opacity-50', 'cursor-not-allowed')
         document.getElementById('btnTriggerDryRun').classList.add('opacity-50', 'cursor-not-allowed')
+      } else {
+        // v2.3.1: 실시간 카운트다운 티커 시작
+        cooldownState.dryRunRemainMs = Number(s.dryRunRemainMs || 0)
+        cooldownState.realSendRemainMs = Number(s.realSendRemainMs || 0)
+        cooldownState.lastSyncAt = Date.now()
+        startCooldownTicker()
       }
       return s
     } catch {
@@ -1374,6 +1381,97 @@
     })
   }
 
+  // ═════════════════════════════════════════════════════════════
+  // ⏱️ v2.3.1: 실시간 쿨다운 카운트다운 UI
+  //   - DRY RUN 버튼: 30초 쿨다운 기준 (dryRunRemainMs)
+  //   - 실제 발송 버튼: 5분 쿨다운 기준 (realSendRemainMs)
+  //   - 초 단위로 카운트다운, 0이 되면 버튼 활성화
+  //   - 서버 상태는 10초마다 재동기화(서버-클라 시계 오차 보정)
+  // ═════════════════════════════════════════════════════════════
+  let cooldownState = {
+    dryRunRemainMs: 0,       // 남은 ms
+    realSendRemainMs: 0,
+    lastSyncAt: 0,           // 마지막 서버 동기화 시각
+    configured: true,        // PAT 설정 여부
+  }
+
+  function formatCountdown(remainMs) {
+    if (remainMs <= 0) return ''
+    const s = Math.ceil(remainMs / 1000)
+    if (s >= 60) {
+      const m = Math.floor(s / 60)
+      const sec = s % 60
+      return `${m}:${String(sec).padStart(2, '0')}`
+    }
+    return `${s}초`
+  }
+
+  /** 단일 버튼의 카운트다운/비활성 상태 렌더링 */
+  function renderButtonCountdown(btnId, remainMs) {
+    const btn = document.getElementById(btnId)
+    if (!btn) return
+    const label = btn.querySelector('.btn-label')
+    const cd = btn.querySelector('.btn-countdown')
+    // PAT 미설정/요청 진행 중/수동 비활성 상태에서는 카운트다운을 덮어쓰지 않음
+    if (!cooldownState.configured || triggerInFlight) return
+
+    if (remainMs > 0) {
+      btn.disabled = true
+      btn.classList.add('opacity-60', 'cursor-not-allowed')
+      if (cd) {
+        cd.classList.remove('hidden')
+        cd.textContent = '(' + formatCountdown(remainMs) + ')'
+      }
+      btn.setAttribute('title', '⏳ 쿨다운: ' + formatCountdown(remainMs) + ' 남음')
+    } else {
+      btn.disabled = false
+      btn.classList.remove('opacity-60', 'cursor-not-allowed')
+      if (cd) {
+        cd.classList.add('hidden')
+        cd.textContent = ''
+      }
+      btn.removeAttribute('title')
+    }
+  }
+
+  /** 서버에서 최신 쿨다운 상태 가져와 동기화 */
+  async function refreshCooldownState() {
+    try {
+      const s = await triggerApi.status()
+      if (!s) return
+      cooldownState.dryRunRemainMs = Number(s.dryRunRemainMs || 0)
+      cooldownState.realSendRemainMs = Number(s.realSendRemainMs || 0)
+      cooldownState.configured = !!s.configured
+      cooldownState.lastSyncAt = Date.now()
+    } catch (e) {
+      // 조용히 실패 — 다음 tick 에 다시 시도
+    }
+  }
+
+  /** 매초 tick — 로컬에서 -1000ms, 10초마다 서버 동기화 */
+  let cooldownTimer = null
+  function startCooldownTicker() {
+    if (cooldownTimer) return
+    // 첫 동기화
+    refreshCooldownState()
+    cooldownTimer = setInterval(() => {
+      // 로컬 감산
+      if (cooldownState.dryRunRemainMs > 0) cooldownState.dryRunRemainMs = Math.max(0, cooldownState.dryRunRemainMs - 1000)
+      if (cooldownState.realSendRemainMs > 0) cooldownState.realSendRemainMs = Math.max(0, cooldownState.realSendRemainMs - 1000)
+
+      // 렌더 (요청 진행 중이 아닐 때만)
+      if (!triggerInFlight && cooldownState.configured) {
+        renderButtonCountdown('btnTriggerDryRun', cooldownState.dryRunRemainMs)
+        renderButtonCountdown('btnTriggerNow', cooldownState.realSendRemainMs)
+      }
+
+      // 10초마다 서버와 재동기화 (다른 기기/탭에서 발송한 경우 반영)
+      if (Date.now() - cooldownState.lastSyncAt > 10_000) {
+        refreshCooldownState()
+      }
+    }, 1000)
+  }
+
   async function onTriggerClick(dryRun) {
     // (v2.2.3) 중복 트리거 방지 — 요청 진행 중이면 즉시 반환
     if (triggerInFlight) {
@@ -1383,8 +1481,8 @@
 
     const actionText = dryRun ? 'DRY RUN (메일 발송 없이 프리뷰만 생성)' : '실제 브리핑 발송'
     const confirmBody = dryRun
-      ? '수집·AI요약만 수행하고 <strong>메일은 보내지 않습니다</strong>.<br>결과는 GitHub Actions 페이지의 artifact 로 다운로드 가능합니다.'
-      : '지금 즉시 <strong>모든 활성 수신자에게 메일</strong>이 발송됩니다.<br>약 1~3분 소요되며, 10분 쿨다운이 적용됩니다.'
+      ? '수집·AI요약만 수행하고 <strong>메일은 보내지 않습니다</strong>.<br>결과는 GitHub Actions 페이지의 artifact 로 다운로드 가능합니다.<br><span class="text-xs text-gray-500">⏱️ 쿨다운: 30초 (테스트 빠른 반복용)</span>'
+      : '지금 즉시 <strong>모든 활성 수신자에게 메일</strong>이 발송됩니다.<br>약 1~3분 소요되며, <strong>5분 쿨다운</strong>이 적용됩니다.<br><span class="text-xs text-amber-600">⚠️ 수신자 스팸 처리 방지를 위해 과도한 반복 발송은 피하세요.</span>'
 
     showConfirm(
       actionText + ' 실행',
@@ -1415,6 +1513,8 @@
              <a href="${res.runsUrl}" target="_blank" class="underline ml-2">진행 상황 보기 <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>`
           )
           toast('🚀 발송 요청 완료', 'success')
+          // v2.3.1: 서버 쿨다운 상태 즉시 재동기화 (버튼 카운트다운 시작)
+          refreshCooldownState()
           // 상태 폴링 시작 — dryRun 값까지 일치해야 매칭 (다른 동시 실행과 혼동 방지)
           startPolling(requestSentAt, dryRun)
         } else {
@@ -1424,6 +1524,10 @@
             `<i class="fa-solid fa-circle-xmark mr-1"></i>${escapeHtml(res.error || '알 수 없는 오류')}${hint}`
           )
           toast('❌ 발송 요청 실패', 'error')
+          // v2.3.1: 429 쿨다운 실패면 서버 상태 동기화
+          if (res.cooldownRemainSec || /연속 호출/.test(res.error || '')) {
+            refreshCooldownState()
+          }
           // 요청 자체 실패 시에는 잠금을 바로 해제 (폴링은 돌지 않음)
           triggerInFlight = false
           setTriggerButtonsDisabled(false)
@@ -1447,6 +1551,8 @@
     const release = () => {
       triggerInFlight = false
       setTriggerButtonsDisabled(false)
+      // v2.3.1: 릴리즈 직후 카운트다운 즉시 동기화 (버튼에 남은 시간 반영)
+      refreshCooldownState()
     }
 
     triggerPollTimer = setInterval(async () => {

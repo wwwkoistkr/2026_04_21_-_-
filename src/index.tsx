@@ -89,7 +89,13 @@ const DEFAULT_RECIPIENT = 'wwwkoistkr@gmail.com'
 // 지금 발송 기본 설정 (Secret 없으면 기본값 사용)
 const DEFAULT_GITHUB_REPO = 'wwwkoistkr/2026_04_21_-_-'
 const DEFAULT_WORKFLOW_FILE = 'daily_briefing.yml'
-const TRIGGER_COOLDOWN_SEC = 600               // 10분 쿨다운
+// v2.3.1: 이중 쿨다운 시스템 — DRY RUN(테스트용)은 짧게, 실제 발송은 안전하게
+// DRY RUN은 메일 발송을 하지 않으므로 빈번한 테스트 허용. 실제 워크플로 실행은 ~2분 소요되어
+// 연속 호출해도 실제 동시 실행은 발생하지 않음.
+const DRY_RUN_COOLDOWN_SEC = 30                 // 테스트용 DRY RUN: 30초 (실행 ~2분이라 사실상 연타 불가)
+const REAL_SEND_COOLDOWN_SEC = 300              // 실제 발송: 5분 (수신자 스팸 처리 방지)
+// 하위 호환: trigger-status 응답에 기본값으로 REAL 쿨다운 노출
+const TRIGGER_COOLDOWN_SEC = REAL_SEND_COOLDOWN_SEC
 
 // ─────────────────────────────────────────────────────────────
 // 🌱 기본 시드 소스 정의 + 추천 프리셋 (옵션 3)
@@ -409,7 +415,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.3.0
+                Daily Briefing Admin v2.3.1
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -450,16 +456,24 @@ app.get('/', (c) => {
         <div class="flex flex-col sm:flex-row gap-2 mt-4 sm:mt-3 sm:ml-16">
           <button id="btnTriggerNow"
             class="touch-target flex-1 sm:flex-initial px-4 py-3 sm:py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-amber-600 transition shadow-sm">
-            <i class="fa-solid fa-paper-plane mr-1"></i>🚀 지금 발송
+            <span class="btn-label"><i class="fa-solid fa-paper-plane mr-1"></i>🚀 지금 발송</span>
+            <span class="btn-countdown hidden ml-1 text-xs opacity-90"></span>
           </button>
           <button id="btnTriggerDryRun"
             class="touch-target flex-1 sm:flex-initial px-4 py-3 sm:py-2.5 bg-white border border-orange-300 text-orange-700 font-medium rounded-lg hover:bg-orange-50 transition">
-            <i class="fa-solid fa-flask mr-1"></i>DRY RUN (미리보기)
+            <span class="btn-label"><i class="fa-solid fa-flask mr-1"></i>DRY RUN (미리보기)</span>
+            <span class="btn-countdown hidden ml-1 text-xs opacity-90"></span>
           </button>
           <button id="btnCheckTriggerStatus"
             class="touch-target px-4 py-3 sm:py-2.5 bg-white border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition" title="최근 워크플로 실행 상태 확인">
             <i class="fa-solid fa-rotate"></i>
           </button>
+        </div>
+        {/* v2.3.1: 이중 쿨다운 안내 */}
+        <div class="mt-3 sm:ml-16 text-[11px] sm:text-xs text-gray-500 leading-relaxed">
+          <i class="fa-solid fa-circle-info mr-1 text-gray-400"></i>
+          <strong>쿨다운 정책 (v2.3.1):</strong>
+          🧪 DRY RUN = <strong>30초</strong> (테스트 빠른 반복)  ·  📧 실제 발송 = <strong>5분</strong> (수신자 보호)
         </div>
       </section>
 
@@ -654,7 +668,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.3.0</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.3.1</span></p>
         <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -758,23 +772,45 @@ async function saveTrigger(env: Bindings, record: TriggerRecord): Promise<void> 
   await env.SOURCES_KV.put(KV_KEY_LAST_TRIGGER, JSON.stringify(record))
 }
 
-/** 현재 지금-발송 기능 설정 상태 조회 */
+/** 현재 지금-발송 기능 설정 상태 조회 (v2.3.1: 이중 쿨다운 반영) */
 app.get('/api/admin/trigger-status', async (c) => {
   const hasToken = !!c.env.GITHUB_TRIGGER_TOKEN
   const repo = c.env.GITHUB_REPO || DEFAULT_GITHUB_REPO
   const workflow = c.env.GITHUB_WORKFLOW_FILE || DEFAULT_WORKFLOW_FILE
   const last = await getLastTrigger(c.env)
   const now = Date.now()
-  const cooldownRemain = last
-    ? Math.max(0, TRIGGER_COOLDOWN_SEC * 1000 - (now - last.timestamp))
-    : 0
+
+  // v2.3.1: DRY RUN 과 실제 발송 각각 남은 쿨다운 계산
+  // - 마지막 트리거가 DRY RUN 이면: 다음 DRY RUN 은 30초 후, 다음 실제 발송은 30초 후 (짧게)
+  // - 마지막 트리거가 실제 발송이면: 다음 실제 발송은 5분 후, 다음 DRY RUN 도 5분 후 (안전하게)
+  // → 즉, 실제 발송 후엔 모두 5분 대기, DRY RUN 후엔 30초만 대기
+  let dryRunRemainMs = 0
+  let realSendRemainMs = 0
+  if (last) {
+    const elapsed = now - last.timestamp
+    if (last.dryRun) {
+      // 직전이 DRY RUN 이면 양쪽 다 30초 쿨다운만 적용
+      dryRunRemainMs = Math.max(0, DRY_RUN_COOLDOWN_SEC * 1000 - elapsed)
+      realSendRemainMs = Math.max(0, DRY_RUN_COOLDOWN_SEC * 1000 - elapsed)
+    } else {
+      // 직전이 실제 발송이면 양쪽 다 5분 쿨다운 적용 (수신자 보호)
+      dryRunRemainMs = Math.max(0, REAL_SEND_COOLDOWN_SEC * 1000 - elapsed)
+      realSendRemainMs = Math.max(0, REAL_SEND_COOLDOWN_SEC * 1000 - elapsed)
+    }
+  }
 
   return c.json({
     configured: hasToken,
     repo,
     workflow,
+    // v2.3.1 이중 쿨다운 정보
+    dryRunCooldownSec: DRY_RUN_COOLDOWN_SEC,
+    realSendCooldownSec: REAL_SEND_COOLDOWN_SEC,
+    dryRunRemainMs,
+    realSendRemainMs,
+    // 하위 호환: 실제 발송 기준 값
     cooldownSec: TRIGGER_COOLDOWN_SEC,
-    cooldownRemainMs: cooldownRemain,
+    cooldownRemainMs: realSendRemainMs,
     last,
   })
 })
@@ -957,15 +993,31 @@ app.post('/api/admin/trigger-now', async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const dryRun = !!body.dryRun
 
-  // 쿨다운 체크
+  // v2.3.1: 이중 쿨다운 체크
+  // - 지금 요청이 DRY RUN → 직전이 DRY RUN 이면 30초, 직전이 실제 발송이면 5분 대기
+  // - 지금 요청이 실제 발송 → 실제 발송은 항상 5분 쿨다운 (직전 종류 무관)
   const last = await getLastTrigger(c.env)
   const now = Date.now()
-  if (last && now - last.timestamp < TRIGGER_COOLDOWN_SEC * 1000) {
-    const remain = Math.ceil((TRIGGER_COOLDOWN_SEC * 1000 - (now - last.timestamp)) / 1000)
+  let requiredCooldownSec: number
+  if (dryRun) {
+    // DRY RUN 요청: 직전이 DRY RUN 이면 짧게, 실제 발송이면 5분 (이메일 쿨링)
+    requiredCooldownSec = last?.dryRun ? DRY_RUN_COOLDOWN_SEC : REAL_SEND_COOLDOWN_SEC
+    // 단, last 가 아예 없으면 쿨다운 0
+    if (!last) requiredCooldownSec = 0
+  } else {
+    // 실제 발송 요청: 항상 5분 쿨다운 (직전 종류와 무관하게 수신자 보호)
+    requiredCooldownSec = REAL_SEND_COOLDOWN_SEC
+    if (!last) requiredCooldownSec = 0
+  }
+
+  if (last && requiredCooldownSec > 0 && now - last.timestamp < requiredCooldownSec * 1000) {
+    const remain = Math.ceil((requiredCooldownSec * 1000 - (now - last.timestamp)) / 1000)
+    const modeLabel = dryRun ? '🧪 DRY RUN' : '📧 실제 발송'
     return c.json({
       ok: false,
-      error: `⏳ 연속 호출 방지: ${remain}초 뒤 다시 시도하세요.`,
+      error: `⏳ 연속 호출 방지 (${modeLabel}): ${remain}초 뒤 다시 시도하세요.`,
       cooldownRemainSec: remain,
+      mode: dryRun ? 'dryRun' : 'realSend',
     }, 429)
   }
 
@@ -1604,7 +1656,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.3.0' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.3.1' })
 )
 
 export default app
