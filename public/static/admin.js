@@ -1382,17 +1382,28 @@
   }
 
   // ═════════════════════════════════════════════════════════════
-  // ⏱️ v2.3.1: 실시간 쿨다운 카운트다운 UI
-  //   - DRY RUN 버튼: 30초 쿨다운 기준 (dryRunRemainMs)
-  //   - 실제 발송 버튼: 5분 쿨다운 기준 (realSendRemainMs)
-  //   - 초 단위로 카운트다운, 0이 되면 버튼 활성화
-  //   - 서버 상태는 10초마다 재동기화(서버-클라 시계 오차 보정)
+  // ⏱️ v2.3.2: 실시간 쿨다운 카운트다운 + 슬라이드바 + 펄스
+  //   - DRY RUN 버튼: 30초 쿨다운 (파란색 바)
+  //   - 실제 발송 버튼: 5분 쿨다운 (주황색 바)
+  //   - 옵션 A: 버튼 내부 하단 얇은 바 (.cooldown-inner-bar)
+  //   - 옵션 C: 버튼 아래 독립 두꺼운 바 (#dryRunCooldownBar, #realSendCooldownBar)
+  //   - 마지막 3초: 초록빛 펄스 애니메이션
+  //   - 초 단위 로컬 감산 + 10초마다 서버 동기화
+  //   - v2.3.2: DRY RUN 시간당 10회 제한 카운터 표시
   // ═════════════════════════════════════════════════════════════
+  const PULSE_THRESHOLD_MS = 3000  // 마지막 3초 펄스
+
   let cooldownState = {
-    dryRunRemainMs: 0,       // 남은 ms
+    dryRunRemainMs: 0,
     realSendRemainMs: 0,
-    lastSyncAt: 0,           // 마지막 서버 동기화 시각
-    configured: true,        // PAT 설정 여부
+    dryRunTotalMs: 30 * 1000,      // 바 진행률 계산용 (총 쿨다운 시간)
+    realSendTotalMs: 300 * 1000,
+    hourlyCount: 0,                 // 최근 1시간 DRY RUN 사용 횟수
+    hourlyLimit: 10,
+    hourlyRemaining: 10,
+    hourlyBlocked: false,
+    lastSyncAt: 0,
+    configured: true,
   }
 
   function formatCountdown(remainMs) {
@@ -1403,34 +1414,126 @@
       const sec = s % 60
       return `${m}:${String(sec).padStart(2, '0')}`
     }
-    return `${s}초`
+    return `0:${String(s).padStart(2, '0')}`
   }
 
-  /** 단일 버튼의 카운트다운/비활성 상태 렌더링 */
-  function renderButtonCountdown(btnId, remainMs) {
+  /** 버튼 + 내부 바 + 독립 바 일괄 렌더링 */
+  function renderCooldownUI(mode, remainMs, totalMs) {
+    // mode: 'dryRun' | 'realSend'
+    const isDry = mode === 'dryRun'
+    const btnId = isDry ? 'btnTriggerDryRun' : 'btnTriggerNow'
+    const barId = isDry ? 'dryRunCooldownBar' : 'realSendCooldownBar'
+    const fillId = isDry ? 'dryRunCooldownFill' : 'realSendCooldownFill'
+    const textId = isDry ? 'dryRunCooldownText' : 'realSendCooldownText'
+    const pulseClass = isDry ? 'cooldown-pulsing-dry' : 'cooldown-pulsing-real'
+
     const btn = document.getElementById(btnId)
+    const bar = document.getElementById(barId)
+    const fill = document.getElementById(fillId)
+    const text = document.getElementById(textId)
     if (!btn) return
-    const label = btn.querySelector('.btn-label')
+
+    const innerBar = btn.querySelector('.cooldown-inner-bar')
     const cd = btn.querySelector('.btn-countdown')
-    // PAT 미설정/요청 진행 중/수동 비활성 상태에서는 카운트다운을 덮어쓰지 않음
+
+    // PAT 미설정 / 요청 진행 중이면 건드리지 않음
     if (!cooldownState.configured || triggerInFlight) return
 
-    if (remainMs > 0) {
+    // v2.3.2: DRY RUN 시간당 한도 초과 시 버튼 항상 비활성 (카운트다운과 무관)
+    const hourlyBlockDry = isDry && cooldownState.hourlyBlocked
+
+    if (remainMs > 0 || hourlyBlockDry) {
+      // 쿨다운 중 또는 시간당 한도 초과 → 비활성
       btn.disabled = true
       btn.classList.add('opacity-60', 'cursor-not-allowed')
+
+      // 카운트다운 텍스트 (버튼 내부, 옵션 A)
       if (cd) {
         cd.classList.remove('hidden')
-        cd.textContent = '(' + formatCountdown(remainMs) + ')'
+        if (hourlyBlockDry && remainMs <= 0) {
+          cd.textContent = `(한도 ${cooldownState.hourlyCount}/${cooldownState.hourlyLimit})`
+        } else {
+          cd.textContent = '(' + formatCountdown(remainMs) + ')'
+        }
       }
-      btn.setAttribute('title', '⏳ 쿨다운: ' + formatCountdown(remainMs) + ' 남음')
+
+      // 독립 슬라이드바 표시 (옵션 C) — 쿨다운이 실제로 진행 중일 때만
+      if (remainMs > 0 && bar && fill && text) {
+        bar.classList.remove('hidden')
+        // 진행률: 100% 에서 시작해 0% 로 감소 (남은 시간 기준)
+        const ratio = Math.max(0, Math.min(1, remainMs / Math.max(1, totalMs)))
+        const percent = (ratio * 100).toFixed(2)
+        fill.style.width = percent + '%'
+        text.textContent = formatCountdown(remainMs)
+
+        // 마지막 3초 펄스 애니메이션
+        if (remainMs <= PULSE_THRESHOLD_MS) {
+          fill.classList.add(pulseClass)
+          if (innerBar) innerBar.classList.add('cooldown-pulsing-inner')
+        } else {
+          fill.classList.remove(pulseClass)
+          if (innerBar) innerBar.classList.remove('cooldown-pulsing-inner')
+        }
+      } else if (bar) {
+        // 시간당 한도 초과 상태 (쿨다운은 0) → 독립 바 숨김
+        bar.classList.add('hidden')
+      }
+
+      // 버튼 내부 바 (옵션 A) — 쿨다운 진행 중에만 표시
+      if (innerBar) {
+        if (remainMs > 0) {
+          const ratio = Math.max(0, Math.min(1, remainMs / Math.max(1, totalMs)))
+          innerBar.style.width = (ratio * 100).toFixed(2) + '%'
+        } else {
+          innerBar.style.width = '0%'
+          innerBar.classList.remove('cooldown-pulsing-inner')
+        }
+      }
+
+      // 툴팁
+      if (hourlyBlockDry && remainMs <= 0) {
+        btn.setAttribute('title', `⚠️ DRY RUN 시간당 한도 초과 (${cooldownState.hourlyCount}/${cooldownState.hourlyLimit}). 강제 해제로 초기화 가능.`)
+      } else {
+        btn.setAttribute('title', '⏳ 쿨다운: ' + formatCountdown(remainMs) + ' 남음')
+      }
     } else {
+      // 쿨다운 해제 → 활성화
       btn.disabled = false
       btn.classList.remove('opacity-60', 'cursor-not-allowed')
+
       if (cd) {
         cd.classList.add('hidden')
         cd.textContent = ''
       }
+      if (bar) bar.classList.add('hidden')
+      if (fill) {
+        fill.style.width = '0%'
+        fill.classList.remove('cooldown-pulsing-dry', 'cooldown-pulsing-real')
+      }
+      if (innerBar) {
+        innerBar.style.width = '0%'
+        innerBar.classList.remove('cooldown-pulsing-inner')
+      }
       btn.removeAttribute('title')
+    }
+  }
+
+  /** 시간당 제한 표시 업데이트 */
+  function renderHourlyInfo() {
+    const el = document.getElementById('dryRunHourlyCountText')
+    if (!el) return
+    el.textContent = `${cooldownState.hourlyCount}/${cooldownState.hourlyLimit}`
+    // 경고 색상
+    const container = document.getElementById('dryRunHourlyInfo')
+    if (container) {
+      container.classList.remove('text-rose-600', 'text-amber-600', 'text-gray-500', 'font-semibold')
+      if (cooldownState.hourlyBlocked) {
+        container.classList.add('text-rose-600', 'font-semibold')
+      } else if (cooldownState.hourlyRemaining <= 3) {
+        container.classList.add('text-amber-600', 'font-semibold')
+      } else {
+        container.classList.add('text-gray-500')
+      }
     }
   }
 
@@ -1441,35 +1544,96 @@
       if (!s) return
       cooldownState.dryRunRemainMs = Number(s.dryRunRemainMs || 0)
       cooldownState.realSendRemainMs = Number(s.realSendRemainMs || 0)
+      // 서버가 반환하는 쿨다운 총 시간 (초 → ms)
+      cooldownState.dryRunTotalMs = Number(s.dryRunCooldownSec || 30) * 1000
+      cooldownState.realSendTotalMs = Number(s.realSendCooldownSec || 300) * 1000
+      // v2.3.2: 시간당 제한 정보
+      cooldownState.hourlyCount = Number(s.dryRunHourlyCount || 0)
+      cooldownState.hourlyLimit = Number(s.dryRunHourlyLimit || 10)
+      cooldownState.hourlyRemaining = Number(s.dryRunHourlyRemaining || 0)
+      cooldownState.hourlyBlocked = !!s.dryRunHourlyBlocked
       cooldownState.configured = !!s.configured
       cooldownState.lastSyncAt = Date.now()
+      // 즉시 렌더
+      renderHourlyInfo()
     } catch (e) {
       // 조용히 실패 — 다음 tick 에 다시 시도
     }
   }
 
-  /** 매초 tick — 로컬에서 -1000ms, 10초마다 서버 동기화 */
+  /** 매초 tick — 로컬 감산 + 10초마다 서버 동기화 */
   let cooldownTimer = null
   function startCooldownTicker() {
     if (cooldownTimer) return
     // 첫 동기화
     refreshCooldownState()
     cooldownTimer = setInterval(() => {
-      // 로컬 감산
+      // 로컬 1초 감산
       if (cooldownState.dryRunRemainMs > 0) cooldownState.dryRunRemainMs = Math.max(0, cooldownState.dryRunRemainMs - 1000)
       if (cooldownState.realSendRemainMs > 0) cooldownState.realSendRemainMs = Math.max(0, cooldownState.realSendRemainMs - 1000)
 
       // 렌더 (요청 진행 중이 아닐 때만)
       if (!triggerInFlight && cooldownState.configured) {
-        renderButtonCountdown('btnTriggerDryRun', cooldownState.dryRunRemainMs)
-        renderButtonCountdown('btnTriggerNow', cooldownState.realSendRemainMs)
+        // 실제 쿨다운이 가장 길게 적용되는 규칙 반영:
+        // - 직전이 REAL 이면 DRY RUN 도 5분 쿨다운 (서버에서 이미 이렇게 계산해서 보내줌)
+        // - 따라서 두 버튼 각각 서버가 내려준 값 기준으로 렌더
+        renderCooldownUI('dryRun', cooldownState.dryRunRemainMs, cooldownState.dryRunTotalMs)
+        renderCooldownUI('realSend', cooldownState.realSendRemainMs, cooldownState.realSendTotalMs)
       }
 
-      // 10초마다 서버와 재동기화 (다른 기기/탭에서 발송한 경우 반영)
+      // 10초마다 서버 재동기화 (다른 기기/탭 반영)
       if (Date.now() - cooldownState.lastSyncAt > 10_000) {
         refreshCooldownState()
       }
     }, 1000)
+  }
+
+  /** 관리자 강제 쿨다운 해제 */
+  async function onResetCooldownClick() {
+    const confirmed = await new Promise((resolve) => {
+      showConfirm({
+        title: '🚨 쿨다운 강제 해제',
+        message: `
+          <p class="mb-2">다음 항목을 <strong>즉시 초기화</strong>합니다:</p>
+          <ul class="list-disc ml-5 space-y-1 text-xs">
+            <li>🧪 DRY RUN 쿨다운 (30초)</li>
+            <li>📧 실제 발송 쿨다운 (5분)</li>
+            <li>⏰ DRY RUN 시간당 카운터 (${cooldownState.hourlyCount}/${cooldownState.hourlyLimit} → 0/10)</li>
+          </ul>
+          <p class="mt-2 text-xs text-rose-600">
+            ⚠️ 긴급 상황에만 사용하세요. 실제 발송 쿨다운 해제는 수신자에게 중복 메일 위험이 있습니다.
+          </p>`,
+        confirmText: '강제 해제',
+        cancelText: '취소',
+        danger: true,
+      }).then(resolve)
+    })
+
+    if (!confirmed) return
+
+    try {
+      const res = await safeFetch('/api/admin/reset-cooldown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resetCooldown: true, resetHourlyLimit: true }),
+      })
+      if (res.ok) {
+        toast('✅ 쿨다운 강제 해제 완료', 'success')
+        showTriggerStatus(
+          'bg-emerald-50 border border-emerald-200 text-emerald-800',
+          `<i class="fa-solid fa-unlock mr-1"></i><strong>강제 해제됨:</strong> ${(res.actions || []).join(' · ')}`
+        )
+        // 즉시 서버 상태 재동기화
+        await refreshCooldownState()
+        // 버튼 즉시 활성화 렌더
+        renderCooldownUI('dryRun', 0, cooldownState.dryRunTotalMs)
+        renderCooldownUI('realSend', 0, cooldownState.realSendTotalMs)
+      } else {
+        toast('❌ 강제 해제 실패: ' + (res.error || '알 수 없는 오류'), 'error')
+      }
+    } catch (e) {
+      toast('❌ 네트워크 오류', 'error')
+    }
   }
 
   async function onTriggerClick(dryRun) {
@@ -1823,6 +1987,7 @@
     const nowBtn = document.getElementById('btnTriggerNow')
     const dryBtn = document.getElementById('btnTriggerDryRun')
     const chkBtn = document.getElementById('btnCheckTriggerStatus')
+    const resetBtn = document.getElementById('btnResetCooldown')  // v2.3.2
     // (v2.2.3) 버튼 자체에서도 진행중 가드 — 이벤트 버블/연타/인풋디바이스 이중 발동 대비
     if (nowBtn) nowBtn.addEventListener('click', (e) => {
       if (triggerInFlight || nowBtn.disabled) { e.preventDefault(); return }
@@ -1833,6 +1998,8 @@
       onTriggerClick(true)
     })
     if (chkBtn) chkBtn.addEventListener('click', onCheckStatus)
+    // v2.3.2: 관리자 강제 쿨다운 해제 버튼
+    if (resetBtn) resetBtn.addEventListener('click', onResetCooldownClick)
   }
 
   // ═════════════════════════════════════════════════════════════

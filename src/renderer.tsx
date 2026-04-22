@@ -73,7 +73,7 @@ export const renderer = jsxRenderer(({ children, title }: any) => {
           href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"
           rel="stylesheet"
         />
-        <link href="/static/style.css?v=2.2.7" rel="stylesheet" />
+        <link href="/static/style.css?v=2.3.2" rel="stylesheet" />
 
         {/* Tailwind 설정: 고해상도 디스플레이 대응 breakpoints */}
         <script

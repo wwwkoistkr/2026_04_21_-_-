@@ -477,3 +477,134 @@ pre code {
     color: #9ca3af !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+ * v2.3.2: 쿨다운 카운트다운 + 슬라이드바 스타일
+ * - 옵션 A: 버튼 내부 하단 얇은 바 (.cooldown-inner-bar)
+ * - 옵션 C: 버튼 아래 독립 두꺼운 바 (.cooldown-slide-container)
+ * - 마지막 3초 펄스 애니메이션 (.cooldown-pulsing)
+ * - 8K 대응: 퍼센트 기반 레이아웃 + rem 단위 최소폭 보장
+ * - 모바일 반응형: h-2 (8px) → h-[10px] (10px) on sm
+ * ═══════════════════════════════════════════════════════════════ */
+
+/* 쿨다운 버튼 공통 */
+.cooldown-btn {
+  transition: opacity 0.2s, box-shadow 0.3s;
+}
+
+.cooldown-btn:disabled {
+  cursor: not-allowed;
+}
+
+/* 옵션 A: 버튼 내부 하단 바 (기본은 높이 3px, 버튼과 일체형) */
+.cooldown-inner-bar {
+  pointer-events: none;
+  will-change: width;
+  /* 부드러운 감소 애니메이션을 위해 transition 은 위에서 인라인 지정 */
+}
+
+/* DRY RUN 버튼 내부 바: 파란색 */
+#btnTriggerDryRun .cooldown-inner-bar {
+  background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.6);
+}
+
+/* 실제 발송 버튼 내부 바: 흰색 (주황 버튼 위에서 대비) */
+#btnTriggerNow .cooldown-inner-bar {
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
+}
+
+/* 옵션 C: 독립 슬라이드바 컨테이너 */
+.cooldown-slide-container {
+  animation: cooldownBarFadeIn 0.3s ease-out;
+}
+
+@keyframes cooldownBarFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 옵션 C: 슬라이드바 fill — width 는 JS 에서 인라인으로 제어 */
+.cooldown-slide-fill {
+  will-change: width, box-shadow, filter;
+}
+
+/* ─── 마지막 3초 펄스 애니메이션 ───
+ * "곧 해제됩니다" 시각적 신호
+ * - 밝기 증가 + 부드러운 깜박임
+ * - 색상 그라데이션이 초록빛으로 살짝 이동 (곧 사용 가능 느낌)
+ */
+@keyframes cooldownPulse {
+  0%, 100% {
+    filter: brightness(1);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+  }
+  50% {
+    filter: brightness(1.4);
+    box-shadow: 0 0 16px rgba(34, 197, 94, 0.9);
+  }
+}
+
+/* DRY RUN 펄스: 파랑 → 초록 전환 */
+.cooldown-slide-fill.cooldown-pulsing-dry {
+  animation: cooldownPulse 0.6s ease-in-out infinite;
+  background: linear-gradient(90deg, #3b82f6 0%, #22c55e 100%) !important;
+}
+
+/* 실제 발송 펄스: 주황 → 초록 전환 */
+.cooldown-slide-fill.cooldown-pulsing-real {
+  animation: cooldownPulse 0.6s ease-in-out infinite;
+  background: linear-gradient(90deg, #f97316 0%, #22c55e 100%) !important;
+}
+
+/* 버튼 내부 바도 마지막 3초에는 펄스 */
+.cooldown-inner-bar.cooldown-pulsing-inner {
+  animation: cooldownPulseInner 0.6s ease-in-out infinite;
+}
+
+@keyframes cooldownPulseInner {
+  0%, 100% { filter: brightness(1); opacity: 0.9; }
+  50%      { filter: brightness(1.5); opacity: 1; }
+}
+
+/* ─── 8K 초고해상도 최적화 ───
+ * 3840px 이상 디스플레이에서 바가 너무 얇아 보이지 않도록 최소 높이 보장
+ */
+@media (min-width: 3840px) {
+  .cooldown-slide-container .relative {
+    height: 14px !important;  /* 8K 에서 더 두껍게 */
+  }
+  .cooldown-inner-bar {
+    height: 5px !important;
+  }
+  #dryRunCooldownText,
+  #realSendCooldownText {
+    font-size: 1rem;
+  }
+}
+
+/* ─── 모바일 (≤640px) 세부 조정 ─── */
+@media (max-width: 640px) {
+  .cooldown-slide-container {
+    /* 모바일에서 버튼 영역과 간격 최소화 */
+    margin-top: 0.5rem;
+  }
+  .cooldown-btn .btn-countdown {
+    font-size: 0.7rem;
+  }
+}
+
+/* ─── 접근성: 모션 줄이기 선호 ─── */
+@media (prefers-reduced-motion: reduce) {
+  .cooldown-slide-fill,
+  .cooldown-inner-bar {
+    transition: width 0.2s linear !important;
+  }
+  .cooldown-slide-fill.cooldown-pulsing-dry,
+  .cooldown-slide-fill.cooldown-pulsing-real,
+  .cooldown-inner-bar.cooldown-pulsing-inner {
+    animation: none !important;
+    filter: brightness(1.2);
+  }
+}

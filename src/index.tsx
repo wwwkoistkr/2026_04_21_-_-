@@ -78,6 +78,7 @@ const KV_KEY_SOURCES = 'sources:v2'            // v2 스키마 (검색어 포함
 const KV_KEY_SOURCES_LEGACY = 'sources:v1'     // 기존 v1 (마이그레이션 참조용)
 const KV_KEY_RECIPIENTS = 'recipients:v1'
 const KV_KEY_LAST_TRIGGER = 'trigger:last'     // "지금 발송" rate-limit 용
+const KV_KEY_DRYRUN_HISTORY = 'trigger:dryrun:hist'  // v2.3.2: DRY RUN 시간당 10회 제한용 실행 타임스탬프 배열
 const KV_KEY_SYNC_VERSION = 'sync:version'     // PC ↔ 모바일 실시간 동기화용 카운터
 const SESSION_COOKIE = 'msaic_session'
 // (v2.2.7) 12시간 → 2시간으로 단축. 사용자 요구 "첫 화면에 비밀번호"
@@ -89,13 +90,17 @@ const DEFAULT_RECIPIENT = 'wwwkoistkr@gmail.com'
 // 지금 발송 기본 설정 (Secret 없으면 기본값 사용)
 const DEFAULT_GITHUB_REPO = 'wwwkoistkr/2026_04_21_-_-'
 const DEFAULT_WORKFLOW_FILE = 'daily_briefing.yml'
-// v2.3.1: 이중 쿨다운 시스템 — DRY RUN(테스트용)은 짧게, 실제 발송은 안전하게
+// v2.3.2: 이중 쿨다운 시스템 — DRY RUN(테스트용)은 짧게, 실제 발송은 안전하게
 // DRY RUN은 메일 발송을 하지 않으므로 빈번한 테스트 허용. 실제 워크플로 실행은 ~2분 소요되어
 // 연속 호출해도 실제 동시 실행은 발생하지 않음.
 const DRY_RUN_COOLDOWN_SEC = 30                 // 테스트용 DRY RUN: 30초 (실행 ~2분이라 사실상 연타 불가)
 const REAL_SEND_COOLDOWN_SEC = 300              // 실제 발송: 5분 (수신자 스팸 처리 방지)
 // 하위 호환: trigger-status 응답에 기본값으로 REAL 쿨다운 노출
 const TRIGGER_COOLDOWN_SEC = REAL_SEND_COOLDOWN_SEC
+// v2.3.2: DRY RUN 시간당 10회 제한 — GitHub Actions 월 2,000분 무료 쿼터 보호
+// 1회당 ~1.5분 소요 → 시간당 10회면 월 최대 450분 (25%) 사용
+const DRY_RUN_HOURLY_LIMIT = 10
+const DRY_RUN_WINDOW_MS = 60 * 60 * 1000  // 1시간 슬라이딩 윈도우
 
 // ─────────────────────────────────────────────────────────────
 // 🌱 기본 시드 소스 정의 + 추천 프리셋 (옵션 3)
@@ -415,7 +420,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.3.1
+                Daily Briefing Admin v2.3.2
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -453,27 +458,89 @@ app.get('/', (c) => {
             <div id="triggerStatus" class="hidden mt-3 p-3 rounded-lg text-xs sm:text-sm"></div>
           </div>
         </div>
+        {/* v2.3.2: 버튼 + 하단 슬라이드바 하이브리드 (옵션 A+C)
+              - 옵션 A: 버튼 내부 하단의 얇은 프로그레스 바 (버튼과 일체형)
+              - 옵션 C: 버튼 아래 독립적인 두꺼운 슬라이드 바 + 카운트다운 텍스트
+              - 모바일 우선 반응형: 세로 스택 → 데스크톱에서 가로 */}
         <div class="flex flex-col sm:flex-row gap-2 mt-4 sm:mt-3 sm:ml-16">
-          <button id="btnTriggerNow"
-            class="touch-target flex-1 sm:flex-initial px-4 py-3 sm:py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-amber-600 transition shadow-sm">
-            <span class="btn-label"><i class="fa-solid fa-paper-plane mr-1"></i>🚀 지금 발송</span>
-            <span class="btn-countdown hidden ml-1 text-xs opacity-90"></span>
-          </button>
-          <button id="btnTriggerDryRun"
-            class="touch-target flex-1 sm:flex-initial px-4 py-3 sm:py-2.5 bg-white border border-orange-300 text-orange-700 font-medium rounded-lg hover:bg-orange-50 transition">
-            <span class="btn-label"><i class="fa-solid fa-flask mr-1"></i>DRY RUN (미리보기)</span>
-            <span class="btn-countdown hidden ml-1 text-xs opacity-90"></span>
-          </button>
+          {/* 🚀 실제 발송 버튼 (주황색) */}
+          <div class="flex-1 sm:flex-initial">
+            <button id="btnTriggerNow"
+              class="cooldown-btn touch-target relative overflow-hidden w-full px-4 py-3 sm:py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-amber-600 transition shadow-sm"
+              data-mode="realSend">
+              <span class="btn-label relative z-10"><i class="fa-solid fa-paper-plane mr-1"></i>🚀 지금 발송</span>
+              <span class="btn-countdown hidden ml-1 text-xs opacity-90 relative z-10"></span>
+              {/* 옵션 A: 버튼 내부 하단 프로그레스 바 (실제 발송 = 주황색) */}
+              <span class="cooldown-inner-bar absolute bottom-0 left-0 h-[3px] bg-white/80 transition-[width] duration-1000 ease-linear" style="width: 0%"></span>
+            </button>
+          </div>
+          {/* 🧪 DRY RUN 버튼 (파란색 계열) */}
+          <div class="flex-1 sm:flex-initial">
+            <button id="btnTriggerDryRun"
+              class="cooldown-btn touch-target relative overflow-hidden w-full px-4 py-3 sm:py-2.5 bg-white border border-blue-300 text-blue-700 font-medium rounded-lg hover:bg-blue-50 transition"
+              data-mode="dryRun">
+              <span class="btn-label relative z-10"><i class="fa-solid fa-flask mr-1"></i>DRY RUN (미리보기)</span>
+              <span class="btn-countdown hidden ml-1 text-xs opacity-90 relative z-10"></span>
+              {/* 옵션 A: 버튼 내부 하단 프로그레스 바 (DRY RUN = 파란색) */}
+              <span class="cooldown-inner-bar absolute bottom-0 left-0 h-[3px] bg-blue-500 transition-[width] duration-1000 ease-linear" style="width: 0%"></span>
+            </button>
+          </div>
+          {/* 🔄 최근 실행 상태 확인 */}
           <button id="btnCheckTriggerStatus"
             class="touch-target px-4 py-3 sm:py-2.5 bg-white border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition" title="최근 워크플로 실행 상태 확인">
             <i class="fa-solid fa-rotate"></i>
           </button>
+          {/* 🚨 v2.3.2: 관리자 강제 쿨다운 해제 (긴급용) */}
+          <button id="btnResetCooldown"
+            class="touch-target px-4 py-3 sm:py-2.5 bg-white border border-rose-300 text-rose-600 text-sm rounded-lg hover:bg-rose-50 transition"
+            title="긴급 상황용: 쿨다운을 즉시 해제합니다">
+            <i class="fa-solid fa-unlock"></i>
+            <span class="hidden sm:inline ml-1">강제 해제</span>
+          </button>
         </div>
-        {/* v2.3.1: 이중 쿨다운 안내 */}
+
+        {/* 옵션 C: 버튼 아래 독립 슬라이드바 (DRY RUN 전용, 카운트다운 중에만 표시) */}
+        <div id="dryRunCooldownBar" class="cooldown-slide-container hidden mt-3 sm:ml-16">
+          <div class="flex items-center gap-2 text-xs sm:text-sm text-blue-700 mb-1">
+            <i class="fa-solid fa-flask text-blue-500"></i>
+            <span class="font-medium">🧪 DRY RUN 쿨다운</span>
+            <span class="ml-auto font-mono font-bold" id="dryRunCooldownText">0:30</span>
+          </div>
+          <div class="relative h-2 sm:h-[10px] bg-blue-100 rounded-full overflow-hidden shadow-inner">
+            <div id="dryRunCooldownFill"
+              class="cooldown-slide-fill absolute top-0 left-0 h-full rounded-full transition-[width] duration-1000 ease-linear"
+              style="width: 0%; background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%); box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);"></div>
+          </div>
+        </div>
+
+        {/* 옵션 C: 실제 발송 전용 독립 슬라이드바 */}
+        <div id="realSendCooldownBar" class="cooldown-slide-container hidden mt-3 sm:ml-16">
+          <div class="flex items-center gap-2 text-xs sm:text-sm text-orange-700 mb-1">
+            <i class="fa-solid fa-paper-plane text-orange-500"></i>
+            <span class="font-medium">📧 실제 발송 쿨다운 (수신자 보호)</span>
+            <span class="ml-auto font-mono font-bold" id="realSendCooldownText">5:00</span>
+          </div>
+          <div class="relative h-2 sm:h-[10px] bg-orange-100 rounded-full overflow-hidden shadow-inner">
+            <div id="realSendCooldownFill"
+              class="cooldown-slide-fill absolute top-0 left-0 h-full rounded-full transition-[width] duration-1000 ease-linear"
+              style="width: 0%; background: linear-gradient(90deg, #f97316 0%, #fb923c 100%); box-shadow: 0 0 8px rgba(249, 115, 22, 0.5);"></div>
+          </div>
+        </div>
+
+        {/* v2.3.2: 이중 쿨다운 안내 + v2.3.2: 시간당 제한 정보 */}
         <div class="mt-3 sm:ml-16 text-[11px] sm:text-xs text-gray-500 leading-relaxed">
-          <i class="fa-solid fa-circle-info mr-1 text-gray-400"></i>
-          <strong>쿨다운 정책 (v2.3.1):</strong>
-          🧪 DRY RUN = <strong>30초</strong> (테스트 빠른 반복)  ·  📧 실제 발송 = <strong>5분</strong> (수신자 보호)
+          <div>
+            <i class="fa-solid fa-circle-info mr-1 text-gray-400"></i>
+            <strong>쿨다운 정책 (v2.3.2):</strong>
+            🧪 DRY RUN = <strong class="text-blue-600">30초</strong> (테스트 반복)  ·
+            📧 실제 발송 = <strong class="text-orange-600">5분</strong> (수신자 보호)
+          </div>
+          <div class="mt-1" id="dryRunHourlyInfo">
+            <i class="fa-solid fa-clock mr-1 text-gray-400"></i>
+            <strong>DRY RUN 시간당 한도:</strong>
+            <span id="dryRunHourlyCountText" class="font-mono">0/10</span> 회 사용
+            <span class="text-gray-400">(GitHub Actions 쿼터 보호)</span>
+          </div>
         </div>
       </section>
 
@@ -668,7 +735,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.3.1</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.3.2</span></p>
         <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -772,7 +839,52 @@ async function saveTrigger(env: Bindings, record: TriggerRecord): Promise<void> 
   await env.SOURCES_KV.put(KV_KEY_LAST_TRIGGER, JSON.stringify(record))
 }
 
-/** 현재 지금-발송 기능 설정 상태 조회 (v2.3.1: 이중 쿨다운 반영) */
+// ─────────────────────────────────────────────────────────────
+// v2.3.2: DRY RUN 시간당 제한 — 최근 1시간 실행 타임스탬프 배열 관리
+// ─────────────────────────────────────────────────────────────
+async function getDryRunHistory(env: Bindings): Promise<number[]> {
+  const raw = await env.SOURCES_KV.get(KV_KEY_DRYRUN_HISTORY, 'json')
+  if (!Array.isArray(raw)) return []
+  // 1시간 이전 기록은 제거 (슬라이딩 윈도우)
+  const cutoff = Date.now() - DRY_RUN_WINDOW_MS
+  return (raw as number[]).filter((ts) => typeof ts === 'number' && ts > cutoff)
+}
+
+async function recordDryRun(env: Bindings): Promise<void> {
+  const history = await getDryRunHistory(env)
+  history.push(Date.now())
+  // 최근 20건만 유지 (10회 제한이므로 여유 10건)
+  const trimmed = history.slice(-20)
+  await env.SOURCES_KV.put(KV_KEY_DRYRUN_HISTORY, JSON.stringify(trimmed))
+}
+
+/** 시간당 제한 검사 결과 */
+interface DryRunLimitInfo {
+  count: number           // 최근 1시간 실행 횟수
+  limit: number           // 허용 한도 (10)
+  remaining: number       // 남은 횟수
+  resetInMs: number       // 가장 오래된 기록이 만료되기까지 남은 시간 (1번 슬롯 회복 시점)
+  blocked: boolean        // true 이면 한도 초과로 차단
+}
+
+async function checkDryRunLimit(env: Bindings): Promise<DryRunLimitInfo> {
+  const history = await getDryRunHistory(env)
+  const now = Date.now()
+  const count = history.length
+  const remaining = Math.max(0, DRY_RUN_HOURLY_LIMIT - count)
+  // 가장 오래된 기록 만료 시점까지 남은 시간 (이후 1번 슬롯 회복)
+  const oldest = history.length > 0 ? Math.min(...history) : now
+  const resetInMs = Math.max(0, oldest + DRY_RUN_WINDOW_MS - now)
+  return {
+    count,
+    limit: DRY_RUN_HOURLY_LIMIT,
+    remaining,
+    resetInMs,
+    blocked: count >= DRY_RUN_HOURLY_LIMIT,
+  }
+}
+
+/** 현재 지금-발송 기능 설정 상태 조회 (v2.3.2: 이중 쿨다운 + 시간당 제한 반영) */
 app.get('/api/admin/trigger-status', async (c) => {
   const hasToken = !!c.env.GITHUB_TRIGGER_TOKEN
   const repo = c.env.GITHUB_REPO || DEFAULT_GITHUB_REPO
@@ -780,7 +892,7 @@ app.get('/api/admin/trigger-status', async (c) => {
   const last = await getLastTrigger(c.env)
   const now = Date.now()
 
-  // v2.3.1: DRY RUN 과 실제 발송 각각 남은 쿨다운 계산
+  // v2.3.2: DRY RUN 과 실제 발송 각각 남은 쿨다운 계산
   // - 마지막 트리거가 DRY RUN 이면: 다음 DRY RUN 은 30초 후, 다음 실제 발송은 30초 후 (짧게)
   // - 마지막 트리거가 실제 발송이면: 다음 실제 발송은 5분 후, 다음 DRY RUN 도 5분 후 (안전하게)
   // → 즉, 실제 발송 후엔 모두 5분 대기, DRY RUN 후엔 30초만 대기
@@ -799,20 +911,67 @@ app.get('/api/admin/trigger-status', async (c) => {
     }
   }
 
+  // v2.3.2: DRY RUN 시간당 제한 정보
+  const dryRunLimit = await checkDryRunLimit(c.env)
+
   return c.json({
     configured: hasToken,
     repo,
     workflow,
-    // v2.3.1 이중 쿨다운 정보
+    // v2.3.2 이중 쿨다운 정보
     dryRunCooldownSec: DRY_RUN_COOLDOWN_SEC,
     realSendCooldownSec: REAL_SEND_COOLDOWN_SEC,
     dryRunRemainMs,
     realSendRemainMs,
+    // v2.3.2 시간당 제한 정보
+    dryRunHourlyLimit: DRY_RUN_HOURLY_LIMIT,
+    dryRunHourlyCount: dryRunLimit.count,
+    dryRunHourlyRemaining: dryRunLimit.remaining,
+    dryRunHourlyResetInMs: dryRunLimit.resetInMs,
+    dryRunHourlyBlocked: dryRunLimit.blocked,
     // 하위 호환: 실제 발송 기준 값
     cooldownSec: TRIGGER_COOLDOWN_SEC,
     cooldownRemainMs: realSendRemainMs,
     last,
   })
+})
+
+/**
+ * v2.3.2: 관리자 강제 쿨다운 해제 API
+ * - 긴급 상황(잘못된 트리거, 테스트 중 실수 등)에 사용
+ * - 쿨다운과 DRY RUN 시간당 카운터를 모두 초기화
+ * - 관리자 세션 (adminSessionMiddleware) 으로 보호됨 — 이 라우터는 이미 /api/admin/* 전체에 적용
+ */
+app.post('/api/admin/reset-cooldown', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const resetCooldown = body.resetCooldown !== false  // 기본 true
+    const resetHourlyLimit = body.resetHourlyLimit === true  // 기본 false (명시적 요청 시만)
+
+    const actions: string[] = []
+
+    if (resetCooldown) {
+      await c.env.SOURCES_KV.delete(KV_KEY_LAST_TRIGGER)
+      actions.push('쿨다운 초기화 (DRY RUN 30초 / 실제 발송 5분 모두 해제)')
+    }
+
+    if (resetHourlyLimit) {
+      await c.env.SOURCES_KV.delete(KV_KEY_DRYRUN_HISTORY)
+      actions.push('DRY RUN 시간당 카운터 초기화 (10/10 으로 복구)')
+    }
+
+    return c.json({
+      ok: true,
+      message: '✅ 강제 해제 완료',
+      actions,
+      timestamp: Date.now(),
+    })
+  } catch (e: any) {
+    return c.json({
+      ok: false,
+      error: `강제 해제 실패: ${e?.message ?? String(e)}`,
+    }, 500)
+  }
 })
 
 /**
@@ -993,7 +1152,7 @@ app.post('/api/admin/trigger-now', async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const dryRun = !!body.dryRun
 
-  // v2.3.1: 이중 쿨다운 체크
+  // v2.3.2: 이중 쿨다운 체크
   // - 지금 요청이 DRY RUN → 직전이 DRY RUN 이면 30초, 직전이 실제 발송이면 5분 대기
   // - 지금 요청이 실제 발송 → 실제 발송은 항상 5분 쿨다운 (직전 종류 무관)
   const last = await getLastTrigger(c.env)
@@ -1021,6 +1180,21 @@ app.post('/api/admin/trigger-now', async (c) => {
     }, 429)
   }
 
+  // v2.3.2: DRY RUN 시간당 10회 제한 체크 (GitHub Actions 쿼터 보호)
+  if (dryRun) {
+    const limitInfo = await checkDryRunLimit(c.env)
+    if (limitInfo.blocked) {
+      const resetMin = Math.ceil(limitInfo.resetInMs / 60_000)
+      return c.json({
+        ok: false,
+        error: `⚠️ DRY RUN 시간당 ${DRY_RUN_HOURLY_LIMIT}회 한도 초과 (${limitInfo.count}/${DRY_RUN_HOURLY_LIMIT}).
+${resetMin}분 뒤에 1슬롯 회복됩니다. GitHub Actions 월 무료 쿼터(2,000분) 보호를 위한 제한입니다.`,
+        dryRunLimit: limitInfo,
+        hint: '긴급 상황이라면 관리 UI의 "쿨다운 강제 해제" 버튼으로 카운터를 초기화할 수 있습니다.',
+      }, 429)
+    }
+  }
+
   const repo = c.env.GITHUB_REPO || DEFAULT_GITHUB_REPO
   const workflow = c.env.GITHUB_WORKFLOW_FILE || DEFAULT_WORKFLOW_FILE
   const dispatchUrl = `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/dispatches`
@@ -1045,6 +1219,10 @@ app.post('/api/admin/trigger-now', async (c) => {
 
     if (resp.status === 204) {
       await saveTrigger(c.env, { timestamp: now, dryRun, ok: true })
+      // v2.3.2: DRY RUN 성공 시 시간당 카운터에 기록
+      if (dryRun) {
+        await recordDryRun(c.env)
+      }
       return c.json({
         ok: true,
         dryRun,
@@ -1656,7 +1834,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.3.1' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.3.2' })
 )
 
 export default app
