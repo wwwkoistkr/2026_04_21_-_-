@@ -101,7 +101,11 @@ def run_pipeline() -> int:
         )
     else:
         try:
-            markdown_summary = summarize_with_gemini(ai_input_text)
+            # v2.5.0: news_list 직접 전달 → 2단계 파이프라인 (랭킹 → 병렬 상세요약)
+            markdown_summary = summarize_with_gemini(
+                briefing_input_text=ai_input_text,  # 하위 호환 (OpenAI 폴백에서 사용)
+                news_list=data,                      # v2.5.0 주 입력
+            )
         except Exception:
             logger.exception("Gemini 요약 단계 실패")
             return 1

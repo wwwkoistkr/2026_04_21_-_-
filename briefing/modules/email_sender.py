@@ -120,74 +120,223 @@ def resolve_recipients(
 
 
 # ---------------------------------------------------------------------------
-# 간단 Markdown → HTML 변환기
+# v2.5.0 카드형 Markdown → HTML 변환기
 # ---------------------------------------------------------------------------
-def _md_to_html(md: str) -> str:
-    """
-    의존성 없이 동작하는 '경량' 마크다운→HTML 변환기.
-    Gemini 가 주로 출력하는 ### 제목 / **굵게** / - 리스트 만 지원.
-    (복잡한 표나 이미지가 필요하면 python-markdown 으로 교체 가능.)
-    """
-    html_lines: List[str] = []
-    in_list = False
+# 카테고리별 색상 (배지용)
+_CATEGORY_COLORS = {
+    "반도체": "#dc2626",      # 빨강
+    "AI": "#7c3aed",          # 보라
+    "미국증시": "#059669",    # 초록
+    "한국증시": "#0284c7",    # 파랑
+    "거시경제": "#d97706",    # 주황
+    "기타": "#64748b",        # 회색
+}
 
-    for raw_line in md.splitlines():
-        line = raw_line.rstrip()
 
-        # 빈 줄
-        if not line.strip():
-            if in_list:
-                html_lines.append("</ul>")
-                in_list = False
-            html_lines.append("")
-            continue
-
-        # 헤딩 ##/###
-        h_match = re.match(r"^(#{1,6})\s+(.*)", line)
-        if h_match:
-            if in_list:
-                html_lines.append("</ul>")
-                in_list = False
-            level = len(h_match.group(1))
-            content = h_match.group(2)
-            content = _inline_md(content)
-            html_lines.append(f"<h{level}>{content}</h{level}>")
-            continue
-
-        # 리스트 항목 "- " 또는 "* "
-        if re.match(r"^\s*[-*]\s+", line):
-            if not in_list:
-                html_lines.append("<ul>")
-                in_list = True
-            item = re.sub(r"^\s*[-*]\s+", "", line)
-            html_lines.append(f"<li>{_inline_md(item)}</li>")
-            continue
-
-        # 기본 단락
-        if in_list:
-            html_lines.append("</ul>")
-            in_list = False
-        html_lines.append(f"<p>{_inline_md(line)}</p>")
-
-    if in_list:
-        html_lines.append("</ul>")
-
-    return "\n".join(html_lines)
+def _category_badge_html(category: str) -> str:
+    color = _CATEGORY_COLORS.get(category, _CATEGORY_COLORS["기타"])
+    return (
+        f'<span style="display:inline-block;padding:3px 10px;border-radius:12px;'
+        f'background:{color};color:#fff;font-size:11px;font-weight:600;'
+        f'letter-spacing:.3px;">{category}</span>'
+    )
 
 
 def _inline_md(text: str) -> str:
-    """인라인 **bold**, *italic*, [link](url) 만 처리."""
-    # 링크 [text](url) → <a href=url>text</a>
+    """인라인 **bold**, *italic*, [link](url) 처리."""
     text = re.sub(
         r"\[([^\]]+)\]\((https?://[^)]+)\)",
-        r'<a href="\2" target="_blank" rel="noopener">\1</a>',
+        r'<a href="\2" target="_blank" rel="noopener" '
+        r'style="color:#1d4ed8;text-decoration:none;font-weight:600;">\1 ↗</a>',
         text,
     )
-    # **bold**
     text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
-    # *italic*
     text = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", text)
     return text
+
+
+def _render_news_card(item: dict) -> str:
+    """v2.5.0: 뉴스 1건을 카드형 HTML 로 렌더링."""
+    rank = item.get("rank", "")
+    title = _inline_md(item.get("title", ""))
+    meta = item.get("meta", {})  # {출처, 카테고리, 요약, 투자 시사점, 원문 링크}
+
+    category = meta.get("카테고리", "기타")
+    source = meta.get("출처", "")
+    summary = _inline_md(meta.get("요약", ""))
+    insight = _inline_md(meta.get("투자 시사점", ""))
+    link_html = _inline_md(meta.get("원문 링크", ""))
+
+    category_badge = _category_badge_html(category)
+    rank_badge = (
+        f'<span style="display:inline-block;width:28px;height:28px;line-height:28px;'
+        f'border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);'
+        f'color:#fff;text-align:center;font-weight:700;font-size:13px;'
+        f'margin-right:10px;vertical-align:middle;">{rank}</span>'
+    )
+
+    return f"""
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    {rank_badge}{category_badge}
+    <span style="margin-left:auto;font-size:12px;color:#64748b;">📰 {source}</span>
+  </div>
+  <h3 style="margin:6px 0 12px;font-size:17px;font-weight:700;color:#0f172a;line-height:1.4;">
+    {title}
+  </h3>
+  <div style="background:#f8fafc;border-left:3px solid #0ea5e9;padding:10px 14px;
+              margin:10px 0;border-radius:4px;font-size:14px;line-height:1.65;color:#334155;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    {summary}
+  </div>
+  <div style="background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;
+              margin:10px 0;border-radius:4px;font-size:14px;line-height:1.65;color:#78350f;">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    {insight}
+  </div>
+  <div style="margin-top:12px;font-size:13px;">
+    🔗 {link_html}
+  </div>
+</div>
+"""
+
+
+def _md_to_html(md: str) -> str:
+    """
+    v2.5.0 카드형 변환기.
+
+    2단계 파이프라인 출력 구조를 인식하여 카드로 변환:
+      ## 📈 헤더
+      ### 1. 제목
+        - **카테고리**: ...
+        - **출처**: ...
+        - **요약**: ...
+        - **투자 시사점**: ...
+        - **원문 링크**: [...](...)
+      ---
+      ### 2. 제목
+      ...
+      ## 🔎 오늘의 한 줄 총평
+      본문
+
+    섹션별로 다른 HTML 컴포넌트 렌더링.
+    """
+    html_lines: List[str] = []
+    # 상태 머신: 현재 파싱 중인 뉴스 카드
+    current_item: Optional[dict] = None
+    in_overview = False
+    header_rendered = False
+
+    def flush_item():
+        nonlocal current_item
+        if current_item is not None:
+            html_lines.append(_render_news_card(current_item))
+            current_item = None
+
+    lines = md.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].rstrip()
+        stripped = line.strip()
+
+        # 구분선 --- 무시
+        if stripped.startswith("---"):
+            i += 1
+            continue
+
+        # 빈 줄
+        if not stripped:
+            i += 1
+            continue
+
+        # H2: ## 📈 헤더 또는 ## 🔎 총평
+        h2 = re.match(r"^##\s+(.*)", line)
+        if h2 and not h2.group(1).startswith("#"):
+            flush_item()
+            content = h2.group(1).strip()
+            if "총평" in content:
+                in_overview = True
+                html_lines.append(f"""
+<div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:10px;
+            padding:18px 22px;margin:24px 0 10px;">
+  <h2 style="margin:0 0 10px;font-size:18px;color:#78350f;font-weight:700;">
+    {_inline_md(content)}
+  </h2>
+""")
+            elif not header_rendered:
+                # 첫 H2 = 브리핑 타이틀
+                header_rendered = True
+                html_lines.append(
+                    f'<h2 style="margin:0 0 12px;font-size:19px;color:#0f172a;'
+                    f'font-weight:700;border-bottom:2px solid #e5e7eb;'
+                    f'padding-bottom:10px;">{_inline_md(content)}</h2>'
+                )
+            else:
+                html_lines.append(
+                    f'<h2 style="margin:20px 0 10px;font-size:17px;color:#0f172a;'
+                    f'font-weight:700;">{_inline_md(content)}</h2>'
+                )
+            i += 1
+            continue
+
+        # H3: ### 1. 제목 → 새 뉴스 카드 시작
+        h3 = re.match(r"^###\s+(\d+)\.\s*(.+)", line)
+        if h3:
+            flush_item()
+            in_overview = False
+            current_item = {
+                "rank": h3.group(1),
+                "title": h3.group(2).strip(),
+                "meta": {},
+            }
+            i += 1
+            continue
+
+        # 리스트 항목 "- **Key**: value" → 카드 메타 수집
+        if current_item is not None:
+            meta_match = re.match(
+                r"^\s*[-*]\s+\*\*([^*]+?)\*\*\s*:\s*(.*)", line,
+            )
+            if meta_match:
+                key = meta_match.group(1).strip()
+                val = meta_match.group(2).strip()
+                # 여러 줄 이어진 내용 지원 (다음 줄이 들여쓰기/목록 아님)
+                j = i + 1
+                while j < len(lines):
+                    nxt = lines[j].rstrip()
+                    if not nxt.strip():
+                        break
+                    if re.match(r"^\s*[-*]\s+", nxt) or re.match(r"^#", nxt):
+                        break
+                    val += " " + nxt.strip()
+                    j += 1
+                current_item["meta"][key] = val
+                i = j
+                continue
+
+        # 총평 섹션 본문
+        if in_overview:
+            html_lines.append(
+                f'<p style="margin:4px 0;font-size:15px;line-height:1.8;color:#78350f;">'
+                f'{_inline_md(line)}</p>'
+            )
+            i += 1
+            continue
+
+        # 기타 일반 텍스트 (인트로 문단 등)
+        flush_item()
+        html_lines.append(
+            f'<p style="margin:10px 0;font-size:14px;line-height:1.7;color:#475569;">'
+            f'{_inline_md(line)}</p>'
+        )
+        i += 1
+
+    flush_item()
+    if in_overview:
+        html_lines.append("</div>")  # 총평 박스 닫기
+
+    return "\n".join(html_lines)
 
 
 # ---------------------------------------------------------------------------
@@ -198,33 +347,60 @@ HTML_TEMPLATE = """\
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{subject}</title>
 </head>
-<body style="margin:0;padding:0;background:#f4f6fb;font-family:'Apple SD Gothic Neo','Malgun Gothic',Helvetica,Arial,sans-serif;color:#222;">
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:'Apple SD Gothic Neo','Malgun Gothic',Helvetica,Arial,sans-serif;color:#0f172a;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 0;">
     <tr>
       <td align="center">
-        <table role="presentation" width="640" cellpadding="0" cellspacing="0"
-               style="background:#ffffff;border-radius:14px;box-shadow:0 4px 12px rgba(0,0,0,0.06);overflow:hidden;">
-          <tr>
-            <td style="background:linear-gradient(135deg,#1d4ed8,#0ea5e9);padding:24px 28px;color:#fff;">
-              <div style="font-size:12px;opacity:.85;letter-spacing:1px;">MORNING STOCK AI · DAILY BRIEFING</div>
-              <div style="font-size:22px;font-weight:700;margin-top:6px;">🌅 Morning Stock AI Briefing Center</div>
-              <div style="font-size:13px;margin-top:4px;opacity:.9;">{today} · 주식·반도체 일일 브리핑</div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:28px 28px 8px;line-height:1.65;font-size:15px;">
-              {body}
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:20px 28px 28px;font-size:12px;color:#888;border-top:1px solid #eee;">
-              이 메일은 GitHub Actions 에 의해 매일 오전 자동 발송됩니다.<br/>
-              원천 데이터: 한국경제/매일경제/머니투데이, Seeking Alpha, ETF.com, Morningstar, 디일렉(YouTube).<br/>
-              요약 엔진: Google Gemini.
-            </td>
-          </tr>
+        <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="max-width:680px;width:100%;">
+
+          <!-- 헤더 카드 -->
+          <tr><td>
+            <div style="background:linear-gradient(135deg,#1d4ed8 0%,#0ea5e9 50%,#06b6d4 100%);
+                        border-radius:14px 14px 0 0;padding:28px 32px;color:#fff;
+                        box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+              <div style="font-size:11px;opacity:.85;letter-spacing:2px;font-weight:600;">
+                MORNING STOCK AI · DAILY BRIEFING
+              </div>
+              <div style="font-size:24px;font-weight:700;margin-top:8px;">
+                🌅 Morning Stock AI Briefing Center
+              </div>
+              <div style="font-size:14px;margin-top:6px;opacity:.95;">
+                {today} · 주식·반도체 일일 브리핑
+              </div>
+              <div style="font-size:11px;margin-top:14px;opacity:.85;border-top:1px solid rgba(255,255,255,.2);
+                          padding-top:10px;">
+                📊 {meta_summary}
+              </div>
+            </div>
+          </td></tr>
+
+          <!-- 본문 카드 -->
+          <tr><td style="background:#ffffff;padding:20px 28px;box-shadow:0 4px 12px rgba(0,0,0,0.04);">
+            {body}
+          </td></tr>
+
+          <!-- 푸터 -->
+          <tr><td style="background:#f8fafc;padding:20px 28px 24px;border-radius:0 0 14px 14px;
+                         border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;
+                         box-shadow:0 4px 12px rgba(0,0,0,0.04);">
+            <div style="margin-bottom:8px;">
+              📌 <strong>이 메일은 매일 오전 7시(KST) GitHub Actions 에 의해 자동 발송됩니다.</strong>
+            </div>
+            <div style="margin-bottom:6px;">
+              🗞️ <strong>원천 데이터</strong>: {sources_summary}
+            </div>
+            <div style="margin-bottom:6px;">
+              🤖 <strong>요약 엔진</strong>: Google Gemini 2.5 Flash (2단계 파이프라인 v2.5.0)
+            </div>
+            <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #cbd5e1;color:#94a3b8;">
+              ⚠️ 본 브리핑은 정보 제공을 위한 참고용 자료이며, 투자 권유가 아닙니다.<br/>
+              최종 투자 판단은 독자 본인의 책임 하에 이루어져야 합니다.
+            </div>
+          </td></tr>
+
         </table>
       </td>
     </tr>
@@ -234,13 +410,53 @@ HTML_TEMPLATE = """\
 """
 
 
+def _extract_sources_from_markdown(md: str) -> str:
+    """마크다운에서 카드별 출처를 추출해 요약 문자열 반환."""
+    from collections import Counter
+    sources = re.findall(r"\*\*출처\*\*\s*:\s*([^\n]+)", md)
+    if not sources:
+        return "한국경제 · 매일경제 · Seeking Alpha · ETF.com 등 주요 경제 매체"
+    # 중복 제거, 최대 6개
+    counter = Counter(s.strip() for s in sources)
+    names = [name for name, _ in counter.most_common(6)]
+    # 괄호 안의 부제목(예: "한국경제(증권)") 은 대표명만
+    cleaned = []
+    seen = set()
+    for n in names:
+        base = re.sub(r"\s*\([^)]*\)\s*", "", n).strip()
+        if base and base not in seen:
+            seen.add(base)
+            cleaned.append(base)
+    return " · ".join(cleaned[:5]) + (" 외" if len(counter) > 5 else "")
+
+
+def _extract_meta_summary_from_markdown(md: str) -> str:
+    """헤더에 표시할 카테고리 구성 문자열 추출."""
+    m = re.search(r"\*\*오늘의 카테고리 구성\*\*\s*:\s*([^\n]+)", md)
+    if m:
+        return m.group(1).strip()
+    # 폴백: 카드 수 세기
+    n = len(re.findall(r"^###\s+\d+\.", md, re.MULTILINE))
+    return f"오늘의 핵심 뉴스 {n}건"
+
+
 def build_html_email(markdown_body: str, subject: str) -> str:
-    """Markdown 브리핑을 완전한 HTML 이메일 본문으로 감싸기."""
-    today = datetime.now().strftime("%Y년 %m월 %d일 (%a)")
+    """v2.5.0: KST 보정 날짜 + 카드형 + 동적 footer 를 포함한 HTML 이메일 생성."""
+    try:
+        from datetime import timezone, timedelta
+        kst = timezone(timedelta(hours=9))
+        now_kst = datetime.now(kst)
+    except Exception:
+        now_kst = datetime.now()
+    weekday_kr = ["월", "화", "수", "목", "금", "토", "일"][now_kst.weekday()]
+    today = now_kst.strftime(f"%Y년 %m월 %d일 ({weekday_kr})")
+
     return HTML_TEMPLATE.format(
         subject=subject,
         today=today,
         body=_md_to_html(markdown_body),
+        meta_summary=_extract_meta_summary_from_markdown(markdown_body),
+        sources_summary=_extract_sources_from_markdown(markdown_body),
     )
 
 
@@ -328,7 +544,7 @@ def send_email(
                 msg["Reply-To"] = sender
                 msg["Date"] = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
                 msg["List-Unsubscribe"] = f"<mailto:{sender}?subject=unsubscribe>"
-                msg["X-Mailer"] = "MorningStockAI-BriefingCenter/2.2.5"
+                msg["X-Mailer"] = "MorningStockAI-BriefingCenter/2.5.0"
                 # 고유 Message-ID — 중복 메일 탐지 방지
                 msg["Message-ID"] = f"<msaic-{int(datetime.utcnow().timestamp()*1000)}-{idx}@{sender.split('@')[-1]}>"
 
