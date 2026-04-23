@@ -1,5 +1,21 @@
 """
-[3단계 v2.5.0] Gemini/OpenAI 호환 API 기반 2단계 요약 엔진.
+[v2.6.3] Gemini/OpenAI 호환 API 기반 2단계 요약 엔진 (OpenAI fallback 강화).
+
+## v2.6.3 핵심 수정 (2026-04-23)
+----------------------------------------------------
+- 증상: Gemini 무료 티어 일일 20회 한도 소진 후 Step 2의 10개 아이템 호출이
+  모두 429 RESOURCE_EXHAUSTED로 실패했으나, 각 아이템이 조용히 원본 폴백 마크다운으로
+  대체되어 파이프라인이 "정상 종료"로 간주됨. 결과: OpenAI 키가 등록되어 있음에도
+  불구하고 item 단계에서는 한 번도 호출되지 않아 AI 요약 없는 브리핑이 발송됨.
+
+### v2.6.3 수정 내역
+  1) `summarize_one_item()` - Gemini 6회 재시도 전부 실패 시 OpenAI 호환 API 호출 추가
+  2) `rank_top_news()`      - Gemini 랭킹 실패 시 OpenAI 호환 API로 동일 프롬프트 재시도
+  3) `generate_overview()`  - Gemini 총평 실패 시 OpenAI 호환 API로 재시도
+  4) `_call_openai_chat()`  - 모든 단계 공통 OpenAI 호출 헬퍼 신규 추가
+  5) `_is_openai_available()` - 환경 변수 OPENAI_API_KEY 존재 체크 헬퍼
+
+## v2.5.0 → v2.6.2 전면 개편 (Option B)
 
 ## v2.5.0 전면 개편 (Option B)
 ----------------------------------------------------
@@ -234,6 +250,60 @@ def _call_gemini_simple(
     return (response.text or "").strip()
 
 
+# ════════════════════════════════════════════════════════════
+# v2.6.3: OpenAI 호환 단일 호출 헬퍼 (모든 단계 공용)
+# ════════════════════════════════════════════════════════════
+def _is_openai_available() -> bool:
+    """OpenAI fallback 사용 가능 여부 체크."""
+    return bool(os.getenv("OPENAI_API_KEY"))
+
+
+def _call_openai_chat(
+    prompt: str,
+    max_tokens: int = 1024,
+    temperature: float = 0.3,
+    system_prompt = None,
+    call_label: str = "",
+) -> str:
+    """
+    v2.6.3: 단일 OpenAI Chat Completions 호출.
+    Gemini 실패 시 각 단계(rank/item/overview)에서 이 함수로 재시도.
+
+    환경 변수:
+      OPENAI_API_KEY  : 필수
+      OPENAI_BASE_URL : 선택 (기본: https://api.openai.com/v1)
+      OPENAI_MODEL    : 선택 (기본: gpt-4o-mini)
+    """
+    from openai import OpenAI
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY 미설정")
+
+    base_url = os.getenv("OPENAI_BASE_URL") or None
+    model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+
+    client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
+    logger.info("OpenAI[%s] model=%s max_tokens=%d 호출 시작", call_label, model_name, max_tokens)
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    resp = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    text = (resp.choices[0].message.content or "").strip()
+    if not text:
+        raise RuntimeError(f"OpenAI[{call_label}] 빈 응답")
+    logger.info("OpenAI[%s] ✅ 성공 (%d자)", call_label, len(text))
+    return text
+
+
 def _call_with_retry(
     client, prompt: str, max_tokens: int, temperature: float,
     call_label: str = "",
@@ -295,10 +365,39 @@ def rank_top_news(
     logger.info("Step 1) 랭킹 호출: 후보=%d건, 프롬프트=%d자",
                 len(news_list), len(prompt))
 
-    text, used_model = _call_with_retry(
-        client, prompt, max_tokens=2048, temperature=0.2, call_label="rank",
-    )
-    logger.info("Step 1) 랭킹 응답 (모델=%s, 길이=%d)", used_model, len(text))
+    # ─────────────────────────────────────────────────────────
+    # v2.6.3: Gemini 랭킹 실패 시 OpenAI 호환 API 재시도
+    # ─────────────────────────────────────────────────────────
+    text = ""
+    used_model = ""
+    try:
+        text, used_model = _call_with_retry(
+            client, prompt, max_tokens=2048, temperature=0.2, call_label="rank",
+        )
+        logger.info("Step 1) 랭킹 응답 (모델=%s, 길이=%d)", used_model, len(text))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Step 1) Gemini 랭킹 실패: %s", exc)
+        if _is_openai_available():
+            try:
+                logger.info("Step 1) → OpenAI fallback 랭킹 시도")
+                text = _call_openai_chat(
+                    prompt, max_tokens=2048, temperature=0.2, call_label="rank",
+                )
+                used_model = "openai-fallback"
+                logger.info("Step 1) ✅ OpenAI 랭킹 성공 (%d자)", len(text))
+            except Exception as exc2:  # noqa: BLE001
+                logger.warning("Step 1) OpenAI 랭킹도 실패: %s", exc2)
+                text = ""
+        if not text:
+            logger.warning("Step 1) 랭킹 API 전면 실패 → 상위 %d건으로 폴백",
+                           TARGET_NEWS_COUNT)
+            return [
+                {
+                    "idx": i, "rank": i + 1, "category": "기타",
+                    "reason": "API 실패 자동 포함", "original": news_list[i],
+                }
+                for i in range(min(TARGET_NEWS_COUNT, len(news_list)))
+            ]
 
     parsed = _parse_ranking_json(text)
     if not parsed:
@@ -592,6 +691,29 @@ def summarize_one_item(client, item: Dict[str, Any]) -> str:
                 if not _is_transient_error(exc):
                     break
 
+    # ─────────────────────────────────────────────────────────
+    # v2.6.3: Gemini 전부 실패 → OpenAI 호환 API 재시도
+    # ─────────────────────────────────────────────────────────
+    if _is_openai_available():
+        try:
+            logger.info("Step 2) item %d → OpenAI fallback 시도", rank)
+            text = _call_openai_chat(
+                prompt,
+                max_tokens=ITEM_MAX_OUTPUT_TOKENS,
+                temperature=0.4,
+                call_label=f"item-{rank}",
+            )
+            valid, reason = _is_item_output_valid(text)
+            if valid:
+                logger.info("Step 2) item %d ✅ OpenAI 성공 (%d자)", rank, len(text))
+                return text
+            logger.warning("Step 2) item %d OpenAI 품질 미달(%s): %d자",
+                           rank, reason, len(text or ""))
+            if text and len(text) > len(best_text):
+                best_text = text
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Step 2) item %d OpenAI 호출 실패: %s", rank, exc)
+
     # 모든 시도 실패 — 원본 정보로 폴백 마크다운 생성
     logger.warning("Step 2) item %d 전체 실패 → 원본 폴백", rank)
     if best_text:
@@ -711,20 +833,37 @@ def _build_overview_prompt(item_markdowns: List[str]) -> str:
 
 
 def generate_overview(client, item_markdowns: List[str]) -> str:
-    """오늘의 총평 생성 (짧은 호출). 실패 시 기본 문장 반환."""
+    """오늘의 총평 생성 (짧은 호출). v2.6.3: Gemini 실패 시 OpenAI 폴백."""
+    prompt = _build_overview_prompt(item_markdowns)
+
+    # Gemini 먼저 시도
     try:
-        prompt = _build_overview_prompt(item_markdowns)
         text, used = _call_with_retry(
             client, prompt, max_tokens=512, temperature=0.5, call_label="overview",
         )
         logger.info("Step 3) 총평 생성 (모델=%s, %d자)", used, len(text))
         return text.strip()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("총평 생성 실패 — 기본 문장 사용: %s", exc)
-        return (
-            f"{_today_kr_str()} 시장은 반도체·AI 섹터의 모멘텀과 미국 거시 지표의 "
-            "영향을 동시에 받고 있습니다. 위 핵심 뉴스들을 참고해 포트폴리오 점검을 권합니다."
-        )
+        logger.warning("Step 3) Gemini 총평 실패: %s", exc)
+
+    # v2.6.3: OpenAI 호환 폴백
+    if _is_openai_available():
+        try:
+            logger.info("Step 3) → OpenAI fallback 총평 시도")
+            text = _call_openai_chat(
+                prompt, max_tokens=512, temperature=0.5, call_label="overview",
+            )
+            logger.info("Step 3) ✅ OpenAI 총평 성공 (%d자)", len(text))
+            return text.strip()
+        except Exception as exc2:  # noqa: BLE001
+            logger.warning("Step 3) OpenAI 총평도 실패: %s", exc2)
+
+    # 최종 기본 문장
+    logger.warning("총평 생성 전면 실패 — 기본 문장 사용")
+    return (
+        f"{_today_kr_str()} 시장은 반도체·AI 섹터의 모멘텀과 미국 거시 지표의 "
+        "영향을 동시에 받고 있습니다. 위 핵심 뉴스들을 참고해 포트폴리오 점검을 권합니다."
+    )
 
 
 def assemble_final_briefing(
@@ -885,7 +1024,7 @@ def summarize_with_gemini(
     # ===== OpenAI 호환 폴백 (v2.4.x 레거시 경로) =====
     if os.getenv("OPENAI_API_KEY"):
         try:
-            openai_model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+            openai_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
             input_text = briefing_input_text
             if not input_text and news_list:
                 from briefing.modules.formatter import format_data_for_ai
@@ -941,7 +1080,7 @@ def _fallback_rule_based_briefing(news_list: List[Dict[str, str]]) -> str:
 # ─── OpenAI 호환 폴백 (v2.4.x 호환 유지) ───────────────────
 def _summarize_with_openai_compat(
     briefing_input_text: str,
-    model_name: str = "gpt-5-mini",
+    model_name: str = "gpt-4o-mini",
 ) -> str:
     from openai import OpenAI
 
