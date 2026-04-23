@@ -1,9 +1,13 @@
 name: Morning Stock AI — Daily Briefing
 
 on:
+  name: Morning Stock AI — Daily Briefing
+
+on:
   schedule:
-    - cron: '- cron: '30 21 * * *'
-    workflow_dispatch:
+    # v2.5.1: 매일 06:30 KST (= 21:30 UTC)
+    - cron: '30 21 * * *'
+  workflow_dispatch:
     inputs:
       dry_run:
         description: "DRY_RUN(true 이면 메일 발송 생략)"
