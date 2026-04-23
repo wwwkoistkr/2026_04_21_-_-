@@ -87,6 +87,17 @@ const KV_KEY_RUN_PROGRESS = 'runs:in_progress'  // 진행 중 스냅샷 (DRY RUN
 const KV_KEY_LATEST_RUN = 'runs:latest'         // 가장 최근 완료 실행 결과
 const KV_KEY_RUN_HISTORY = 'runs:history'       // 최근 N건 이력 (최대 10건)
 const RUN_HISTORY_MAX = 10
+
+// v2.6.0: 3단계 분리 파이프라인(Phase 2)용 중간 상태 저장 키
+// 실행일자(KST 기준) 별로 collect/summarize 결과를 분리 저장.
+//   - pipeline:state:YYYYMMDD = { stage, collectedAt, summarizedAt, sentAt, stats }
+//   - pipeline:collected:YYYYMMDD = [ {source,title,link,summary}, ... ]    (raw news)
+//   - pipeline:summary:YYYYMMDD  = markdown 요약 전체 (UTF-8 문자열)
+// TTL 72시간 — 주말/휴일에 재실행해도 복구 가능하도록.
+const KV_KEY_PIPELINE_STATE_PREFIX   = 'pipeline:state:'
+const KV_KEY_PIPELINE_COLLECTED_PFX  = 'pipeline:collected:'
+const KV_KEY_PIPELINE_SUMMARY_PFX    = 'pipeline:summary:'
+const PIPELINE_STATE_TTL_SEC = 72 * 3600  // 72h
 const SESSION_COOKIE = 'msaic_session'
 // (v2.2.7) 12시간 → 2시간으로 단축. 사용자 요구 "첫 화면에 비밀번호"
 // 를 만족시키기 위함. 자주 사용하는 사용자는 모바일 PWA에 저장된 비밀번호로
@@ -435,7 +446,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.5.3
+                Daily Briefing Admin v2.6.0
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -556,6 +567,70 @@ app.get('/', (c) => {
             <span id="dryRunHourlyCountText" class="font-mono">0/10</span> 회 사용
             <span class="text-gray-400">(GitHub Actions 쿼터 보호)</span>
           </div>
+        </div>
+      </section>
+
+      {/* 🔄 v2.6.0: 3단계 파이프라인 상태 카드 */}
+      <section class="bg-gradient-to-br from-slate-50 to-indigo-50 border-2 border-indigo-200 rounded-2xl shadow p-4 sm:p-6 mb-6">
+        <div class="flex items-start justify-between gap-3 mb-3 flex-wrap">
+          <div class="flex items-start gap-3">
+            <div class="flex-shrink-0 text-2xl sm:text-3xl">🔄</div>
+            <div>
+              <h2 class="text-base sm:text-lg font-bold text-gray-800">
+                오늘의 파이프라인 상태 (v2.6.0)
+              </h2>
+              <p class="text-xs sm:text-sm text-gray-600 mt-0.5">
+                <strong>Collect → Summarize → Send</strong> 3단계 중 어디까지 진행됐는지 실시간으로 확인합니다.
+                실패한 단계만 선택해 재실행할 수 있습니다.
+              </p>
+            </div>
+          </div>
+          <button id="btnPipelineRefresh"
+            class="touch-target px-3 py-2 text-xs bg-white border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition">
+            <i class="fa-solid fa-rotate mr-1"></i>새로고침
+          </button>
+        </div>
+
+        {/* 3단계 스테이지 타일 */}
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3" id="pipelineStages">
+          {/* 초기 상태 — JS 가 덮어쓰기 */}
+          <div class="stage-tile bg-white border border-gray-200 rounded-lg p-3" data-stage="collect">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs font-semibold text-gray-500">① Collect</span>
+              <span class="stage-badge text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">pending</span>
+            </div>
+            <div class="text-xs text-gray-700 stage-info">수집 대기 중…</div>
+            <button class="stage-rerun mt-2 hidden w-full text-[11px] px-2 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded hover:bg-indigo-100">
+              <i class="fa-solid fa-play mr-1"></i>이 단계 재실행
+            </button>
+          </div>
+          <div class="stage-tile bg-white border border-gray-200 rounded-lg p-3" data-stage="summarize">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs font-semibold text-gray-500">② Summarize</span>
+              <span class="stage-badge text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">pending</span>
+            </div>
+            <div class="text-xs text-gray-700 stage-info">요약 대기 중…</div>
+            <button class="stage-rerun mt-2 hidden w-full text-[11px] px-2 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded hover:bg-indigo-100">
+              <i class="fa-solid fa-play mr-1"></i>이 단계 재실행
+            </button>
+          </div>
+          <div class="stage-tile bg-white border border-gray-200 rounded-lg p-3" data-stage="send">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs font-semibold text-gray-500">③ Send</span>
+              <span class="stage-badge text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">pending</span>
+            </div>
+            <div class="text-xs text-gray-700 stage-info">발송 대기 중…</div>
+            <button class="stage-rerun mt-2 hidden w-full text-[11px] px-2 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded hover:bg-indigo-100">
+              <i class="fa-solid fa-play mr-1"></i>이 단계 재실행
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-3 text-[11px] sm:text-xs text-gray-500 leading-relaxed">
+          <i class="fa-solid fa-circle-info mr-1 text-indigo-400"></i>
+          <strong>단계별 실행 팁:</strong>
+          <span class="text-gray-700">수집(AI 호출 0회)</span> 실패 시 재실행해도 할당량 소모 없음.
+          <span class="text-gray-700">요약</span>이 실패하면 <strong>다음날 09:00 KST</strong>(Gemini 쿼터 리셋) 이후 재실행 권장.
         </div>
       </section>
 
@@ -845,7 +920,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.5.3</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.6.0</span></p>
         <p class="mt-1">매일 06:30 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -1226,6 +1301,248 @@ app.get('/api/admin/run-history', async (c) => {
   return c.json({ ok: true, count: history.length, history })
 })
 
+// ═════════════════════════════════════════════════════════════
+// 🔄 v2.6.0: 3단계 파이프라인(Phase 2) — collect → summarize → send
+// ═════════════════════════════════════════════════════════════
+/**
+ * 설계 배경
+ * --------
+ * 기존 main.py 는 "수집→AI요약→발송"을 한 번에 돌려서 15분 제한에 걸리거나,
+ * AI 요약에서 실패하면 이전 수집 결과도 함께 날아갔다.
+ * v2.6.0 부터는 GitHub Actions 를 3 단계로 분리하고, 각 단계 결과를
+ * KV 에 저장해 "다음 단계만 재시도" 가능하게 한다.
+ *
+ *  단계       | KV 키 prefix              | 쓰는 쪽        | 읽는 쪽
+ *  ----------|---------------------------|---------------|------------------
+ *  collect   | pipeline:collected:YYMMDD | 01_collect.yml | 02_summarize.yml
+ *  summarize | pipeline:summary:YYMMDD   | 02_summarize   | 03_send.yml
+ *  status    | pipeline:state:YYMMDD     | 모든 단계       | 관리 UI
+ *
+ * 모든 저장 API 는 BRIEFING_REPORT_TOKEN 으로 인증.
+ * 관리 UI 용 조회 API 는 /api/admin/* 로 노출.
+ */
+
+/** 오늘 날짜(KST) 를 YYYYMMDD 문자열로 반환 (파이프라인 키에 사용). */
+function kstDateKey(d: Date = new Date()): string {
+  const kst = new Date(d.getTime() + 9 * 3600 * 1000)
+  const y = kst.getUTCFullYear()
+  const m = String(kst.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(kst.getUTCDate()).padStart(2, '0')
+  return `${y}${m}${day}`
+}
+
+type PipelineStage = 'collect' | 'summarize' | 'send'
+type PipelineStageStatus = 'pending' | 'in_progress' | 'ok' | 'failed' | 'skipped'
+
+interface PipelineState {
+  date: string                        // YYYYMMDD (KST)
+  stages: {
+    collect:   { status: PipelineStageStatus; at?: number; count?: number; error?: string }
+    summarize: { status: PipelineStageStatus; at?: number; chars?: number;  error?: string }
+    send:      { status: PipelineStageStatus; at?: number; recipients?: number; error?: string }
+  }
+  updatedAt: number
+}
+
+/** 초기/기본 상태 */
+function emptyPipelineState(date: string): PipelineState {
+  return {
+    date,
+    stages: {
+      collect:   { status: 'pending' },
+      summarize: { status: 'pending' },
+      send:      { status: 'pending' },
+    },
+    updatedAt: Date.now(),
+  }
+}
+
+/**
+ * v2.6.0: 수집 단계가 완료되면 수집 결과(뉴스 리스트)를 KV 에 저장.
+ * 인증: Bearer BRIEFING_REPORT_TOKEN
+ * Body: { date?: "YYYYMMDD", news: [{source,title,link,summary}, ...] }
+ *        date 생략 시 KST 오늘.
+ */
+app.post('/api/public/pipeline/collected', async (c) => {
+  const auth = checkReportToken(c)
+  if (!auth.ok) return c.json({ ok: false, error: `인증 실패: ${auth.reason}` }, 401)
+
+  try {
+    const body = await c.req.json() as { date?: string; news?: any[] }
+    const date = (body.date && /^\d{8}$/.test(body.date)) ? body.date : kstDateKey()
+    const news = Array.isArray(body.news) ? body.news : []
+
+    if (news.length === 0) {
+      return c.json({ ok: false, error: 'news 배열이 비었습니다' }, 400)
+    }
+
+    // 수집 결과 저장 (72h TTL)
+    await c.env.SOURCES_KV.put(
+      KV_KEY_PIPELINE_COLLECTED_PFX + date,
+      JSON.stringify(news),
+      { expirationTtl: PIPELINE_STATE_TTL_SEC },
+    )
+
+    // 상태 업데이트
+    const stateKey = KV_KEY_PIPELINE_STATE_PREFIX + date
+    const prev = await c.env.SOURCES_KV.get(stateKey, 'json') as PipelineState | null
+    const state = prev ?? emptyPipelineState(date)
+    state.stages.collect = { status: 'ok', at: Date.now(), count: news.length }
+    state.updatedAt = Date.now()
+    await c.env.SOURCES_KV.put(stateKey, JSON.stringify(state),
+      { expirationTtl: PIPELINE_STATE_TTL_SEC })
+
+    return c.json({ ok: true, date, count: news.length })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/**
+ * v2.6.0: 요약 단계에서 수집 결과 읽어가기.
+ * 인증: Bearer BRIEFING_READ_TOKEN (수집기가 소스 목록 가져올 때 쓰는 토큰 재사용)
+ * 쿼리: ?date=YYYYMMDD (생략 시 KST 오늘)
+ */
+app.get('/api/public/pipeline/collected', async (c) => {
+  const expected = c.env.BRIEFING_READ_TOKEN
+  const auth = c.req.header('authorization') || ''
+  const m = auth.match(/^Bearer\s+(.+)$/i)
+  if (!expected || !m || m[1] !== expected) {
+    return c.json({ ok: false, error: '인증 실패 (Bearer BRIEFING_READ_TOKEN 필요)' }, 401)
+  }
+
+  const date = (c.req.query('date') || '').match(/^\d{8}$/) ? c.req.query('date')! : kstDateKey()
+  const news = await c.env.SOURCES_KV.get(KV_KEY_PIPELINE_COLLECTED_PFX + date, 'json')
+  if (!news) {
+    return c.json({ ok: false, error: `수집 데이터 없음 (date=${date})` }, 404)
+  }
+  return c.json({ ok: true, date, count: (news as any[]).length, news })
+})
+
+/**
+ * v2.6.0: 요약 단계 완료 시 마크다운 결과를 저장.
+ * 인증: Bearer BRIEFING_REPORT_TOKEN
+ * Body: { date?: "YYYYMMDD", markdown: "...", meta?: {...} }
+ */
+app.post('/api/public/pipeline/summary', async (c) => {
+  const auth = checkReportToken(c)
+  if (!auth.ok) return c.json({ ok: false, error: `인증 실패: ${auth.reason}` }, 401)
+
+  try {
+    const body = await c.req.json() as { date?: string; markdown?: string; error?: string }
+    const date = (body.date && /^\d{8}$/.test(body.date)) ? body.date : kstDateKey()
+
+    const stateKey = KV_KEY_PIPELINE_STATE_PREFIX + date
+    const prev = await c.env.SOURCES_KV.get(stateKey, 'json') as PipelineState | null
+    const state = prev ?? emptyPipelineState(date)
+
+    if (body.error) {
+      state.stages.summarize = { status: 'failed', at: Date.now(), error: String(body.error).slice(0, 500) }
+    } else if (body.markdown && body.markdown.length > 0) {
+      await c.env.SOURCES_KV.put(
+        KV_KEY_PIPELINE_SUMMARY_PFX + date,
+        body.markdown,
+        { expirationTtl: PIPELINE_STATE_TTL_SEC },
+      )
+      state.stages.summarize = { status: 'ok', at: Date.now(), chars: body.markdown.length }
+    } else {
+      return c.json({ ok: false, error: 'markdown 또는 error 필드 필요' }, 400)
+    }
+
+    state.updatedAt = Date.now()
+    await c.env.SOURCES_KV.put(stateKey, JSON.stringify(state),
+      { expirationTtl: PIPELINE_STATE_TTL_SEC })
+
+    return c.json({ ok: true, date, chars: body.markdown?.length ?? 0 })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/**
+ * v2.6.0: 발송 단계에서 요약 결과 읽어가기.
+ * 인증: Bearer BRIEFING_READ_TOKEN
+ */
+app.get('/api/public/pipeline/summary', async (c) => {
+  const expected = c.env.BRIEFING_READ_TOKEN
+  const auth = c.req.header('authorization') || ''
+  const m = auth.match(/^Bearer\s+(.+)$/i)
+  if (!expected || !m || m[1] !== expected) {
+    return c.json({ ok: false, error: '인증 실패 (Bearer BRIEFING_READ_TOKEN 필요)' }, 401)
+  }
+
+  const date = (c.req.query('date') || '').match(/^\d{8}$/) ? c.req.query('date')! : kstDateKey()
+  const markdown = await c.env.SOURCES_KV.get(KV_KEY_PIPELINE_SUMMARY_PFX + date)
+  if (!markdown) {
+    return c.json({ ok: false, error: `요약 데이터 없음 (date=${date})` }, 404)
+  }
+  return c.json({ ok: true, date, chars: markdown.length, markdown })
+})
+
+/**
+ * v2.6.0: 발송 완료/실패 기록.
+ * 인증: Bearer BRIEFING_REPORT_TOKEN
+ */
+app.post('/api/public/pipeline/send', async (c) => {
+  const auth = checkReportToken(c)
+  if (!auth.ok) return c.json({ ok: false, error: `인증 실패: ${auth.reason}` }, 401)
+
+  try {
+    const body = await c.req.json() as { date?: string; recipients?: number; error?: string }
+    const date = (body.date && /^\d{8}$/.test(body.date)) ? body.date : kstDateKey()
+
+    const stateKey = KV_KEY_PIPELINE_STATE_PREFIX + date
+    const prev = await c.env.SOURCES_KV.get(stateKey, 'json') as PipelineState | null
+    const state = prev ?? emptyPipelineState(date)
+
+    if (body.error) {
+      state.stages.send = { status: 'failed', at: Date.now(), error: String(body.error).slice(0, 500) }
+    } else {
+      state.stages.send = {
+        status: 'ok', at: Date.now(),
+        recipients: typeof body.recipients === 'number' ? body.recipients : 0,
+      }
+    }
+    state.updatedAt = Date.now()
+    await c.env.SOURCES_KV.put(stateKey, JSON.stringify(state),
+      { expirationTtl: PIPELINE_STATE_TTL_SEC })
+
+    return c.json({ ok: true, date, state: state.stages.send })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/**
+ * v2.6.0: 관리 UI 용 파이프라인 상태 조회.
+ * GET /api/admin/pipeline-state?date=YYYYMMDD   (date 생략 시 KST 오늘)
+ * 상태, 수집 건수, 요약 글자수, 발송 수신자 수 반환.
+ */
+app.get('/api/admin/pipeline-state', async (c) => {
+  const date = (c.req.query('date') || '').match(/^\d{8}$/) ? c.req.query('date')! : kstDateKey()
+  const stateKey = KV_KEY_PIPELINE_STATE_PREFIX + date
+  const state = await c.env.SOURCES_KV.get(stateKey, 'json') as PipelineState | null
+
+  // 실제 데이터 존재 여부도 체크 (상태는 있지만 데이터 TTL 만료됐을 수 있음)
+  const [collectedRaw, summary] = await Promise.all([
+    c.env.SOURCES_KV.get(KV_KEY_PIPELINE_COLLECTED_PFX + date, 'json'),
+    c.env.SOURCES_KV.get(KV_KEY_PIPELINE_SUMMARY_PFX + date),
+  ])
+
+  return c.json({
+    ok: true,
+    date,
+    state: state ?? emptyPipelineState(date),
+    dataAvailable: {
+      collected: !!collectedRaw,
+      collectedCount: Array.isArray(collectedRaw) ? (collectedRaw as any[]).length : 0,
+      summary:   !!summary,
+      summaryChars: summary ? (summary as string).length : 0,
+    },
+    serverTime: Date.now(),
+  })
+})
+
 /**
  * v2.2.7 수신자 동기화 진단 — "왜 이메일이 특정 사람에게만 가는가" 해결용
  *
@@ -1403,6 +1720,18 @@ app.post('/api/admin/trigger-now', async (c) => {
 
   const body = await c.req.json().catch(() => ({}))
   const dryRun = !!body.dryRun
+  // v2.6.0: stage 파라미터 — 'collect' | 'summarize' | 'send' | 'all' (기본 all)
+  // 'all' 이면 기존 레거시 워크플로우(daily_briefing.yml) 실행,
+  // 그 외는 각각 daily_0{1,2,3}_*.yml 워크플로우를 독립적으로 디스패치.
+  const stageRaw = typeof body.stage === 'string' ? body.stage.toLowerCase() : 'all'
+  const STAGE_TO_WORKFLOW: Record<string, string> = {
+    collect:   'daily_01_collect.yml',
+    summarize: 'daily_02_summarize.yml',
+    send:      'daily_03_send.yml',
+    all:       c.env.GITHUB_WORKFLOW_FILE || DEFAULT_WORKFLOW_FILE,
+  }
+  const stage = STAGE_TO_WORKFLOW[stageRaw] ? stageRaw : 'all'
+  const isStageMode = stage !== 'all'
 
   // v2.3.2: 이중 쿨다운 체크
   // - 지금 요청이 DRY RUN → 직전이 DRY RUN 이면 30초, 직전이 실제 발송이면 5분 대기
@@ -1448,8 +1777,15 @@ ${resetMin}분 뒤에 1슬롯 회복됩니다. GitHub Actions 월 무료 쿼터(
   }
 
   const repo = c.env.GITHUB_REPO || DEFAULT_GITHUB_REPO
-  const workflow = c.env.GITHUB_WORKFLOW_FILE || DEFAULT_WORKFLOW_FILE
+  const workflow = STAGE_TO_WORKFLOW[stage]
   const dispatchUrl = `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/dispatches`
+
+  // v2.6.0: stage 모드의 daily_0X_*.yml 워크플로우는 dry_run 입력을 받지 않으므로
+  //         스테이지 모드에서는 inputs 를 생략 (send 단계만 예외적으로 dry_run 지원).
+  const dispatchInputs: Record<string, string> = {}
+  if (stage === 'all' || stage === 'send') {
+    dispatchInputs.dry_run = dryRun ? 'true' : 'false'
+  }
 
   try {
     const resp = await fetch(dispatchUrl, {
@@ -1463,24 +1799,28 @@ ${resetMin}분 뒤에 1슬롯 회복됩니다. GitHub Actions 월 무료 쿼터(
       },
       body: JSON.stringify({
         ref: 'main',
-        inputs: {
-          dry_run: dryRun ? 'true' : 'false',
-        },
+        inputs: dispatchInputs,
       }),
     })
 
     if (resp.status === 204) {
+      // 스테이지 모드일 때는 dryRun/lastTrigger 기록 자체를 가볍게 처리
       await saveTrigger(c.env, { timestamp: now, dryRun, ok: true })
-      // v2.3.2: DRY RUN 성공 시 시간당 카운터에 기록
-      if (dryRun) {
+      if (dryRun && !isStageMode) {
         await recordDryRun(c.env)
       }
+      const stageLabelKo = ({
+        collect: '수집', summarize: '요약', send: '발송', all: '전체',
+      } as Record<string, string>)[stage]
       return c.json({
         ok: true,
         dryRun,
-        message: dryRun
-          ? '✅ DRY RUN 요청됨 — 메일 발송 없이 프리뷰만 생성'
-          : '✅ 브리핑 발송 요청됨 — 약 1~3분 뒤 이메일 도착',
+        stage,
+        message: isStageMode
+          ? `✅ ${stageLabelKo} 단계 워크플로우 요청됨 — GitHub Actions 에서 실행 중`
+          : (dryRun
+              ? '✅ DRY RUN 요청됨 — 메일 발송 없이 프리뷰만 생성'
+              : '✅ 브리핑 발송 요청됨 — 약 1~3분 뒤 이메일 도착'),
         runsUrl: `https://github.com/${repo}/actions/workflows/${workflow}`,
       })
     }
@@ -2124,7 +2464,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.5.3' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.6.0' })
 )
 
 export default app

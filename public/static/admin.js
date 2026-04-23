@@ -160,6 +160,9 @@
   const dashboardApi = {
     latest: () => safeFetch('/api/admin/latest-run'),
     history: () => safeFetch('/api/admin/run-history'),
+    // v2.6.0: 3단계 파이프라인 상태
+    pipelineState: (date) =>
+      safeFetch('/api/admin/pipeline-state' + (date ? `?date=${date}` : '')),
   }
 
   // ═════════════════════════════════════════════════════════════
@@ -2336,6 +2339,133 @@
     refreshDashboard()
   }
 
+  // ═════════════════════════════════════════════════════════════
+  // 🔄 v2.6.0: 3단계 파이프라인 상태 카드
+  // ═════════════════════════════════════════════════════════════
+  const PIPELINE_STAGES = ['collect', 'summarize', 'send']
+  const PIPELINE_STAGE_LABEL_KO = {
+    collect:   '수집',
+    summarize: '요약',
+    send:      '발송',
+  }
+  const PIPELINE_BADGE_CLASS = {
+    pending:     'bg-gray-100 text-gray-500',
+    in_progress: 'bg-amber-100 text-amber-700 animate-pulse',
+    ok:          'bg-emerald-100 text-emerald-700',
+    failed:      'bg-rose-100 text-rose-700',
+    skipped:     'bg-slate-100 text-slate-600',
+  }
+
+  /** 상태에 맞게 각 stage 타일을 덮어쓴다. */
+  function renderPipelineStages(state, dataAvailable) {
+    if (!state || !state.stages) return
+    PIPELINE_STAGES.forEach((stage) => {
+      const tile = document.querySelector(`.stage-tile[data-stage="${stage}"]`)
+      if (!tile) return
+      const s = state.stages[stage] || { status: 'pending' }
+      const badge = tile.querySelector('.stage-badge')
+      const info = tile.querySelector('.stage-info')
+      const rerun = tile.querySelector('.stage-rerun')
+
+      if (badge) {
+        badge.textContent = s.status
+        badge.className =
+          'stage-badge text-[10px] px-2 py-0.5 rounded-full ' +
+          (PIPELINE_BADGE_CLASS[s.status] || PIPELINE_BADGE_CLASS.pending)
+      }
+
+      if (info) {
+        const parts = []
+        if (s.at) {
+          const d = new Date(s.at)
+          parts.push(`완료 ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`)
+        }
+        if (stage === 'collect' && typeof s.count === 'number') {
+          parts.push(`${s.count}건 수집`)
+        } else if (stage === 'summarize' && typeof s.chars === 'number') {
+          parts.push(`${s.chars.toLocaleString()}자 요약`)
+        } else if (stage === 'send' && typeof s.recipients === 'number') {
+          parts.push(`${s.recipients}명 발송`)
+        }
+        if (s.error) {
+          parts.push(`<span class="text-rose-600">❌ ${escapeHtml(s.error.slice(0, 80))}</span>`)
+        }
+        if (parts.length === 0) {
+          parts.push(`${PIPELINE_STAGE_LABEL_KO[stage]} 대기 중…`)
+        }
+        info.innerHTML = parts.join(' · ')
+      }
+
+      // 재실행 버튼: 실패했거나, 이전 단계는 성공했는데 이 단계는 pending 일 때만 노출
+      if (rerun) {
+        const prevOk = isPrevStageOk(stage, state)
+        const showRerun = (s.status === 'failed') || (s.status === 'pending' && prevOk)
+        rerun.classList.toggle('hidden', !showRerun)
+        rerun.onclick = () => onPipelineStageRerun(stage)
+      }
+    })
+  }
+
+  function isPrevStageOk(stage, state) {
+    if (stage === 'collect') return true
+    if (stage === 'summarize') return state.stages.collect?.status === 'ok'
+    if (stage === 'send') return state.stages.summarize?.status === 'ok'
+    return false
+  }
+
+  /** 재실행 버튼 클릭 → GitHub Actions 워크플로우 트리거 (기존 trigger-now 경로 재사용). */
+  async function onPipelineStageRerun(stage) {
+    const label = PIPELINE_STAGE_LABEL_KO[stage]
+    const ok = await showConfirm({
+      title: `${label} 단계 재실행`,
+      message: `${label} 워크플로우를 지금 재실행할까요?\n` +
+        (stage === 'summarize'
+          ? '⚠️ AI 쿼터 제한이 있으니 당일에 여러 번 실행은 주의하세요.'
+          : stage === 'collect'
+            ? '수집은 AI 호출 없이 안전합니다.'
+            : '발송은 수신자에게 메일이 도착합니다. DRY RUN 이 아닙니다.'),
+      confirmText: '재실행',
+      danger: stage === 'send',
+    })
+    if (!ok) return
+
+    try {
+      // 기존 "지금 발송" 기능과 동일한 dispatch API 재사용 + stage 인자 전달
+      const res = await safeFetch('/api/admin/trigger-now', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage }),
+      })
+      if (res.ok) {
+        toast(`🚀 ${label} 단계 재실행 요청 완료`, 'success')
+        setTimeout(refreshPipelineCard, 3000)
+      } else {
+        toast(`❌ 재실행 실패: ${res.error || '알 수 없는 오류'}`, 'warn')
+      }
+    } catch (e) {
+      toast(`❌ 네트워크 오류: ${e.message || e}`, 'warn')
+    }
+  }
+
+  async function refreshPipelineCard() {
+    try {
+      const res = await dashboardApi.pipelineState()
+      if (res && res.ok) {
+        renderPipelineStages(res.state, res.dataAvailable)
+      }
+    } catch (e) {
+      console.warn('[Pipeline] refresh failed:', e)
+    }
+  }
+
+  function setupPipelineCard() {
+    const refreshBtn = document.getElementById('btnPipelineRefresh')
+    if (refreshBtn) refreshBtn.addEventListener('click', refreshPipelineCard)
+    refreshPipelineCard()
+    // 60초마다 자동 갱신
+    setInterval(refreshPipelineCard, 60000)
+  }
+
   function setupTriggerButtons() {
     const nowBtn = document.getElementById('btnTriggerNow')
     const dryBtn = document.getElementById('btnTriggerDryRun')
@@ -2478,6 +2608,7 @@
   setupDiagButtons()
   setupRecipientBulkHandlers()
   setupDashboard()  // v2.4.0: 수집 대시보드
+  setupPipelineCard()  // v2.6.0: 3단계 파이프라인 상태 카드
   loadPresets().then(() => reload())
   reloadRecipients()
   checkTriggerConfig()

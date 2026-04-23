@@ -4,3 +4,8 @@ feedparser>=6.0.11
 google-genai>=1.0.0
 google-api-python-client>=2.130.0
 openai>=1.50.0
+# v2.6.0: 원문 스크래핑 — Google News RSS 에 본문이 비어있는 문제 해결
+trafilatura>=1.12.0
+lxml>=5.2.0
+# v2.6.0: Google News 리다이렉트 URL → 실제 언론사 URL 디코딩
+googlenewsdecoder>=0.1.7

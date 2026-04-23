@@ -219,6 +219,14 @@ def get_news_from_rss(
                     f"RSS 파싱됐으나 기사 없음 ({reason}) — {source_name}"
                 )
 
+            # v2.6.0: RSS 의 description 이 빈약하면 원문 스크래핑으로 보강
+            try:
+                from briefing.collectors.article_scraper import enrich_summary
+                _scrape_enabled = True
+            except ImportError:  # pragma: no cover
+                enrich_summary = None
+                _scrape_enabled = False
+
             for entry in feed.entries[:limit]:
                 title = getattr(entry, "title", "").strip()
                 link = getattr(entry, "link", "").strip()
@@ -227,12 +235,24 @@ def get_news_from_rss(
                     or getattr(entry, "description", None)
                     or ""
                 )
+                cleaned = _clean_summary(summary_raw, max_len=2000)
+
+                # 스크래핑 보강 (RSS 요약이 짧거나 HTML 래퍼뿐일 때)
+                if _scrape_enabled and enrich_summary and link:
+                    try:
+                        enriched = enrich_summary(cleaned, link)
+                        if enriched and len(enriched) > len(cleaned):
+                            cleaned = enriched
+                    except Exception as exc:  # noqa: BLE001
+                        # 스크래핑 실패는 조용히 무시 (원본 cleaned 유지)
+                        logger.debug("[scrape] enrich 실패 %s: %s", link, exc)
+
                 articles.append(
                     {
                         "source": source_name,
                         "title": title,
                         "link": link,
-                        "summary": _clean_summary(summary_raw),
+                        "summary": cleaned,
                     }
                 )
             return articles

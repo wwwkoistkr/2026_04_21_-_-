@@ -64,6 +64,24 @@ TARGET_NEWS_COUNT = 10          # 최종 출력 뉴스 개수
 MIN_ITEM_CHARS = 250            # 뉴스 1건의 최소 글자수
 ITEM_MAX_OUTPUT_TOKENS = 1024   # 1건 요약에 충분 (한국어 약 500~700자)
 
+# ─── v2.6.0: 순차 호출/페이싱 (Gemini 무료 티어 RPM 제한 대응) ────
+# Gemini 무료 티어: gemini-2.5-flash = 10 RPM (분당 10회).
+# 기존엔 ThreadPoolExecutor(max_workers=4) 로 동시에 4건을 호출했고,
+# 10건 랭킹+총평까지 합치면 12회/1분 이내로 초과해 429 발생 빈번.
+# SUMMARY_MODE=sequential 이면 각 호출 사이 SUMMARY_CALL_DELAY_SEC 초 대기.
+#
+# 환경 변수
+#   SUMMARY_MODE               : "sequential" | "parallel" (기본 sequential)
+#   SUMMARY_CALL_DELAY_SEC     : 순차 호출 간 대기(기본 6초 = 10 RPM 안전)
+#   SUMMARY_MAX_WORKERS        : parallel 일 때 동시 실행 수 (기본 4)
+SUMMARY_MODE = os.getenv("SUMMARY_MODE", "sequential").strip().lower()
+SUMMARY_CALL_DELAY_SEC = float(os.getenv("SUMMARY_CALL_DELAY_SEC", "6"))
+SUMMARY_MAX_WORKERS = int(os.getenv("SUMMARY_MAX_WORKERS", "4"))
+
+# 개별 뉴스 요약에 원문 본문(스크래핑 결과)이 얼마나 잘려 들어갈지
+# — 기존 500자 에서 1500자 로 확장해 AI 가 재료를 충분히 확보하도록.
+ITEM_PROMPT_BODY_CHARS = int(os.getenv("ITEM_PROMPT_BODY_CHARS", "1500"))
+
 # ─── 공통 유틸 ─────────────────────────────────────────────
 def _is_transient_error(exc: Exception) -> bool:
     msg = str(exc)
@@ -309,25 +327,32 @@ def _build_item_prompt(item: Dict[str, Any]) -> str:
     rank = item["rank"]
     category = item.get("category", "기타")
 
+    # v2.6.0: 원문 본문을 최대 1500자까지 확장 (기존 500자 → 1500자)
+    # 이유: 원문 스크래핑(trafilatura)으로 얻은 풍부한 본문을 AI에게 충분히 전달해
+    #       "제목만 바꿔 쓴 요약"이 아닌 "본문을 근거로 한 서술형 3문장+" 생성 유도.
+    body_chars = ITEM_PROMPT_BODY_CHARS
     return f"""당신은 한국 개인투자자를 위한 시니어 애널리스트입니다.
 오늘은 **{today}** (KST) 입니다.
 
 아래 뉴스 1건을 **투자자 관점에서 깊이 있게 분석**하여 마크다운으로 작성하세요.
 
 ## 절대 준수 사항
-1. **분량**: 전체 응답은 **최소 {MIN_ITEM_CHARS}자 이상** (요약 본문 최소 3문장).
-2. **날짜**: 절대 과거 날짜를 쓰지 마세요. 참조가 필요하면 "{today}" 또는 "오늘".
-3. **언어**: 원문이 영어여도 **반드시 자연스러운 한국어로 번역/의역**.
-4. **완결된 문장**: 중간에 끊기면 실패. 모든 문장은 마침표로 끝나야 함.
-5. **형식 엄수**: 아래 마크다운 구조 그대로, 빈 줄 포함.
+1. **분량**: 전체 응답은 **최소 {MIN_ITEM_CHARS}자 이상** (요약 본문 **반드시 최소 3문장, 권장 4~5문장**의 서술형).
+2. **서술형**: 요약 섹션은 "● ●" 같은 불릿이나 단편적 구절 나열이 아닌, **완결된 문장 3문장 이상**으로 작성.
+   (예: "삼성전자가 ~를 발표했다. 이는 ~ 때문이며, 업계에서는 ~로 평가한다. 특히 ~가 주목된다.")
+3. **원문 활용**: 아래 '원본 뉴스 정보'의 **요약 본문을 근거로** 배경·규모·당사자·시장 영향을 구체적으로 풀어 쓰세요.
+4. **날짜**: 절대 과거 날짜를 쓰지 마세요. 참조가 필요하면 "{today}" 또는 "오늘".
+5. **언어**: 원문이 영어여도 **반드시 자연스러운 한국어로 번역/의역**.
+6. **완결된 문장**: 중간에 끊기면 실패. 모든 문장은 마침표로 끝나야 함.
+7. **형식 엄수**: 아래 마크다운 구조 그대로, 빈 줄 포함.
 
 ## 출력 형식 (이 구조만 허용)
 ### {rank}. {{한국어로 재작성한 핵심 제목 (25자 내외)}}
 
 - **카테고리**: {category}
 - **출처**: {orig.get("source", "")}
-- **요약**: {{핵심 사실을 3~4문장으로 설명. 배경·규모·당사자·시장 영향을 빠짐없이.}}
-- **투자 시사점**: {{이 뉴스가 어떤 종목/섹터에 어떤 영향(수혜/피해)을 미치는지 2문장.}}
+- **요약**: {{핵심 사실을 **3문장 이상**의 서술형으로 설명. 배경·규모·당사자·시장 영향을 빠짐없이.}}
+- **투자 시사점**: {{이 뉴스가 어떤 종목/섹터에 어떤 영향(수혜/피해)을 미치는지 **2문장 이상**의 서술형.}}
 - **원문 링크**: [{orig.get("source", "원문")}]({orig.get("link", "")})
 
 ---
@@ -335,7 +360,7 @@ def _build_item_prompt(item: Dict[str, Any]) -> str:
 ## 원본 뉴스 정보
 - 출처: {orig.get("source", "")}
 - 제목: {orig.get("title", "")}
-- 요약: {orig.get("summary", "")[:500]}
+- 본문: {orig.get("summary", "")[:body_chars]}
 - 링크: {orig.get("link", "")}
 
 위 원본 정보만을 근거로 작성하세요. 확인되지 않은 사실은 추가하지 마세요.
@@ -424,12 +449,51 @@ def _fallback_item_markdown(item: Dict[str, Any]) -> str:
 
 
 def summarize_all_items_parallel(
-    client, ranked_items: List[Dict[str, Any]], max_workers: int = 4,
+    client,
+    ranked_items: List[Dict[str, Any]],
+    max_workers: int = 4,
 ) -> List[str]:
-    """선정된 10개를 병렬로 상세 요약. 순서는 rank 기준으로 정렬하여 반환."""
+    """
+    v2.6.0: 환경 변수 SUMMARY_MODE 에 따라 순차/병렬 분기.
+
+    - sequential (기본): 각 호출 사이 SUMMARY_CALL_DELAY_SEC 초 대기.
+      Gemini 무료 티어 RPM(분당 10회) 제한을 안전하게 통과.
+    - parallel: 기존 ThreadPoolExecutor 기반 병렬 실행.
+
+    환경 변수
+    ----------
+    SUMMARY_MODE : "sequential" | "parallel"
+    SUMMARY_CALL_DELAY_SEC : float (순차 호출 간 대기)
+    SUMMARY_MAX_WORKERS : int (parallel 일 때만 사용)
+
+    *함수명은 하위 호환을 위해 유지* (내부적으로 모드 분기).
+    """
+    mode = SUMMARY_MODE
     results: Dict[int, str] = {}
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    if mode == "sequential":
+        logger.info(
+            "Step 2) 순차 모드 — %d건, 호출 간격 %.1f초",
+            len(ranked_items), SUMMARY_CALL_DELAY_SEC,
+        )
+        for idx, item in enumerate(ranked_items):
+            rank = item["rank"]
+            if idx > 0 and SUMMARY_CALL_DELAY_SEC > 0:
+                time.sleep(SUMMARY_CALL_DELAY_SEC)
+            try:
+                results[rank] = summarize_one_item(client, item)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Step 2) item %d 예외(순차): %s", rank, exc)
+                results[rank] = _fallback_item_markdown(item)
+        return [results[r] for r in sorted(results.keys())]
+
+    # parallel 모드 (하위 호환)
+    effective_workers = max(1, min(max_workers, SUMMARY_MAX_WORKERS))
+    logger.info(
+        "Step 2) 병렬 모드 — %d건, max_workers=%d",
+        len(ranked_items), effective_workers,
+    )
+    with ThreadPoolExecutor(max_workers=effective_workers) as pool:
         future_to_rank = {
             pool.submit(summarize_one_item, client, item): item["rank"]
             for item in ranked_items
@@ -439,8 +503,7 @@ def summarize_all_items_parallel(
             try:
                 results[rank] = fut.result()
             except Exception as exc:  # noqa: BLE001
-                logger.error("Step 2) item %d 예외: %s", rank, exc)
-                # 해당 item 찾아 폴백
+                logger.error("Step 2) item %d 예외(병렬): %s", rank, exc)
                 item = next((x for x in ranked_items if x["rank"] == rank), None)
                 if item:
                     results[rank] = _fallback_item_markdown(item)
