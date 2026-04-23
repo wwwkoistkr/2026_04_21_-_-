@@ -130,58 +130,65 @@ def _build_ranking_prompt(news_list: List[Dict[str, str]]) -> str:
 아래 후보 뉴스 {len(news_list)}건 중, 오늘 투자자에게 가장 중요한 **핵심 뉴스 정확히 {TARGET_NEWS_COUNT}개**를
 순위를 매겨 선정해 주세요.
 
-## 🚨 필수 카테고리 최소 비율 (v2.6.2 - 반드시 준수)
-반드시 아래 카테고리별 **최소 수량**을 지켜 선정하세요.
+## 🚨 필수 카테고리 정확한 비율 (v2.6.2 - 반드시 준수)
+반드시 아래 카테고리별 **정확한 수량**을 지켜 선정하세요.
 국내 편향을 방지하고 글로벌 시황을 균형 있게 전달하기 위함입니다.
+독자는 매일 동일한 구성의 브리핑을 기대하므로 이 비율은 **고정**입니다.
 
-| 카테고리 | 최소 필수 건수 | 설명 |
-|---------|-------------|------|
-| 🇺🇸 **미국증시/해외** | **최소 3건** | Seeking Alpha, Reuters, Bloomberg, ETF.com, Morningstar 등 영문 매체 출처 |
-| 💻 반도체 | 최소 2건 | HBM, 파운드리, 삼성전자, SK하이닉스, TSMC, 마이크론, 엔비디아 |
-| 🤖 AI | 최소 1건 | 엔비디아, AMD, AI 인프라/반도체 관련 |
-| 🇰🇷 한국증시 | 최소 2건 | 코스피/코스닥 주요 이슈, 정부 정책 |
+| 카테고리 | 필수 건수 | 설명 |
+|---------|----------|------|
+| 🇺🇸 **미국 매체 뉴스** | **정확히 4건** | Seeking Alpha, Reuters, Bloomberg, ETF.com, Morningstar (영문 출처) |
+| 🇰🇷 **한국 매체 뉴스** | **정확히 6건** | 한국경제, 매일경제, 머니투데이, 조선비즈 등 한글 출처 |
 
-**합계: 최소 8건 (미국 3 + 반도체 2 + AI 1 + 한국 2) + 나머지 2건은 자유 선택**
+**합계: 미국 4건 + 한국 6건 = 총 10건 (엄격히 준수)**
 
-## 선정 우선순위
-1. 반도체 (HBM, 파운드리, 메모리, SK하이닉스, 삼성전자, TSMC, 마이크론)
-2. AI (엔비디아, AMD, AI 인프라 투자)
-3. **미국 증시 · ETF · 거시 (나스닥, S&P, 환율, 금리, 연준) — 반드시 3건 이상 포함**
-4. 한국 증시 주요 이슈 (코스피/코스닥 주도주, 정부 정책)
-5. 기타 시장 영향도 큰 기업/산업 뉴스
+## 선정 우선순위 (각 그룹 내에서 적용)
+### 🇺🇸 미국 매체 4건 선정 기준
+1. 반도체·AI (엔비디아, AMD, 인텔, 마이크론, TSMC, HBM)
+2. 미국 증시 · ETF · 거시 (나스닥, S&P, 환율, 금리, 연준)
+3. 빅테크 (애플, 마이크로소프트, 아마존, 메타, 구글)
+4. 기타 시장 영향도 큰 미국 기업/산업 뉴스
 
-## 제외 기준
+### 🇰🇷 한국 매체 6건 선정 기준
+1. 반도체 (삼성전자, SK하이닉스, HBM, 파운드리, 메모리)
+2. 한국 증시 주요 이슈 (코스피/코스닥 주도주, 정부 정책)
+3. AI 관련 한국 기업·산업 뉴스
+4. 환율·금리 등 한국 투자자에게 직접 영향이 큰 거시 뉴스
+
+## 제외 기준 (양쪽 공통)
 - 광고성·이벤트·당첨 공지
 - 동일 사건 중복 기사 (→ 가장 정보가 풍부한 1건만 선택)
 - 시장 영향이 없는 단순 인사·사회 뉴스
 
-## 💡 미국 매체 식별 팁
-후보 뉴스의 `(출처)` 부분이 다음 중 하나이면 **미국 뉴스**입니다:
-- Seeking Alpha / Seeking Alpha (ETF)
-- Reuters / Bloomberg
-- ETF.com / Morningstar
+## 💡 출처 식별 가이드
+후보 뉴스의 `(출처)` 부분으로 판단하세요:
+- **🇺🇸 미국 매체**: Seeking Alpha, Seeking Alpha (ETF), Reuters, Bloomberg, ETF.com, Morningstar
+- **🇰🇷 한국 매체**: 한국경제(증권), 한국경제(IT), 매일경제(증권), 매일경제(IT), 머니투데이(증권), 머니투데이(IT), 조선비즈 등
 
-이 미국 매체 뉴스는 **제목이 영어**일 수 있지만 한국 투자자에게도 중요하므로
-반드시 Top 10 중 **3건 이상** 포함해 주세요.
+미국 매체 뉴스는 **제목이 영어**이더라도 한국 투자자에게 중요하므로
+반드시 **정확히 4건**을 선정해야 합니다.
 
 ## 출력 형식 (반드시 순수 JSON 배열만, 설명 문장 없이)
 ```json
 [
-  {{"idx": 후보번호, "rank": 1, "category": "반도체", "reason": "선정 이유 한 줄"}},
+  {{"idx": 후보번호, "rank": 1, "category": "반도체", "region": "US", "reason": "선정 이유 한 줄"}},
   ...(총 {TARGET_NEWS_COUNT}개)
 ]
 ```
 
 - `idx`: 위 후보 목록의 [번호]
-- `rank`: 1~{TARGET_NEWS_COUNT} (중복 불가)
-- `category`: "반도체" | "AI" | "미국증시" | "한국증시" | "거시경제" | "기타"
+- `rank`: 1~{TARGET_NEWS_COUNT} (중복 불가, 미국 4건 먼저[1~4], 한국 6건 이후[5~10])
+- `category`: "반도체" | "AI" | "미국증시" | "한국증시" | "거시경제" | "빅테크" | "기타"
+- `region`: **"US"** (미국 매체) 또는 **"KR"** (한국 매체) — 반드시 명시
 - `reason`: 왜 오늘 중요한지 한 줄 (20자 내외)
 
 {news_block}
 
 위 {len(news_list)}건 중 정확히 {TARGET_NEWS_COUNT}개를 선정하되,
-🇺🇸 미국 매체(Seeking Alpha/Reuters/Bloomberg/ETF.com/Morningstar) 뉴스를
-**반드시 3건 이상** 포함해야 합니다. JSON 배열로만 답변하세요.
+🇺🇸 미국 매체(Seeking Alpha/Reuters/Bloomberg/ETF.com/Morningstar) 뉴스 **정확히 4건** +
+🇰🇷 한국 매체 뉴스 **정확히 6건**을 포함해야 합니다.
+**rank 1~4는 미국, rank 5~10은 한국으로 순서를 맞춰주세요.**
+JSON 배열로만 답변하세요.
 """
 
 
@@ -339,25 +346,29 @@ def rank_top_news(
     result = result[:TARGET_NEWS_COUNT]
 
     # ─────────────────────────────────────────────────────────────
-    # v2.6.2: 🇺🇸 미국 뉴스 최소 쿼터 강제 보장 (AI 편향 방지 안전장치)
+    # v2.6.2: 🇺🇸 미국 4건 + 🇰🇷 한국 6건 엄격 쿼터 + 순서 재배치
     # ─────────────────────────────────────────────────────────────
-    # AI 프롬프트에 "미국 3건 이상" 을 명시했지만,
-    # Gemini 가 한글 후보에 편향될 경우를 대비해 **코드 레벨** 에서도
-    # 미국 매체 뉴스의 최소 수량을 강제로 끼워 넣는다.
-    result = _enforce_us_quota(result, news_list, seen_idx, min_us=US_MIN_QUOTA)
+    # 독자는 매일 동일 구성의 브리핑을 기대하므로 수량을 고정한다.
+    # 또한 "미국 섹션 먼저 → 한국 섹션 나중" 구조이므로
+    # 미국 4건이 rank 1~4 로 오도록 재정렬한다.
+    result = _enforce_region_quota(result, news_list, seen_idx,
+                                    target_us=US_QUOTA, target_kr=KR_QUOTA)
 
-    logger.info("Step 1) 최종 선정: %d건", len(result))
+    logger.info("Step 1) 최종 선정: %d건 (미국 %d + 한국 %d)", len(result),
+                sum(1 for r in result if _is_us_source(r["original"].get("source", ""))),
+                sum(1 for r in result if not _is_us_source(r["original"].get("source", ""))))
     return result
 
 
 # ═══════════════════════════════════════════════════════════════
-# v2.6.2: 미국 매체 식별 및 최소 쿼터 강제 로직
+# v2.6.2: 미국/한국 매체 식별 + 엄격 쿼터(미국 4 + 한국 6) 강제 로직
 # ═══════════════════════════════════════════════════════════════
 US_SOURCE_KEYWORDS = (
     "Seeking Alpha", "Reuters", "Bloomberg",
     "ETF.com", "Morningstar",
 )
-US_MIN_QUOTA = 3  # Top 10 중 미국 뉴스 최소 보장 건수
+US_QUOTA = 4  # 🇺🇸 미국 매체 Top 10 중 정확한 건수 (v2.6.2 고정)
+KR_QUOTA = 6  # 🇰🇷 한국 매체 Top 10 중 정확한 건수 (v2.6.2 고정)
 
 
 def _is_us_source(source: str) -> bool:
@@ -371,76 +382,110 @@ def _is_us_source(source: str) -> bool:
     return False
 
 
-def _enforce_us_quota(
+def _enforce_region_quota(
     ranked: List[Dict[str, Any]],
     all_news: List[Dict[str, str]],
     seen_idx: set,
-    min_us: int = US_MIN_QUOTA,
+    target_us: int = US_QUOTA,
+    target_kr: int = KR_QUOTA,
 ) -> List[Dict[str, Any]]:
     """
-    Top 10 결과에 미국 매체 뉴스가 ``min_us`` 건 미만이면,
-    후보 목록의 미채택 미국 뉴스로 하위 랭크를 강제 교체한다.
+    v2.6.2: 엄격한 미국/한국 매체 쿼터 강제 + 순서 재배치.
 
-    - 기존 Top ``min_us`` 건 (상위권) 은 보존.
-    - 하위 (rank 10, 9, 8 ...) 항목을 미국 뉴스로 교체.
+    최종 목표 구성:
+      - rank 1~target_us (4): 🇺🇸 미국 매체 뉴스
+      - rank target_us+1 ~ target_us+target_kr (5~10): 🇰🇷 한국 매체 뉴스
+
+    동작:
+      1. AI 선정 결과를 미국/한국 두 버킷으로 분리.
+      2. 각 버킷이 목표치에 못 미치면 원본 후보에서 보충.
+      3. 각 버킷이 목표치를 초과하면 낮은 순위부터 제거.
+      4. 미국 먼저(rank 1~4), 한국 나중(rank 5~10) 으로 재정렬.
+
+    이 함수 완료 후 정확히 ``target_us + target_kr`` (=10) 건이 반환된다.
     """
-    current_us = [r for r in ranked if _is_us_source(r["original"].get("source", ""))]
-    current_us_count = len(current_us)
+    target_total = target_us + target_kr
 
-    if current_us_count >= min_us:
-        logger.info(
-            "🇺🇸 미국 뉴스 %d건 포함 (쿼터 %d 충족) — 교체 불필요",
-            current_us_count, min_us,
-        )
-        return ranked
+    # 1) AI 선정 결과를 미국/한국 버킷으로 분리
+    ai_us = [r for r in ranked if _is_us_source(r["original"].get("source", ""))]
+    ai_kr = [r for r in ranked if not _is_us_source(r["original"].get("source", ""))]
 
-    need = min_us - current_us_count
-    # 후보 목록에서 아직 선정 안 된 미국 뉴스 찾기
-    available_us_candidates = [
-        (i, n) for i, n in enumerate(all_news)
-        if _is_us_source(n.get("source", "")) and i not in seen_idx
-    ]
-
-    if not available_us_candidates:
-        logger.warning(
-            "🇺🇸 미국 뉴스 쿼터 부족(%d/%d) 이지만 후보에도 미국 뉴스 없음 — 스킵",
-            current_us_count, min_us,
-        )
-        return ranked
-
-    # 하위 rank 부터 교체 대상 선정 (미국 뉴스는 제외하고)
-    non_us_items = [r for r in ranked if not _is_us_source(r["original"].get("source", ""))]
-    non_us_items.sort(key=lambda x: x["rank"], reverse=True)  # 하위 rank 우선
-
-    replaced = 0
-    to_replace_idxs = set()
-    for r in non_us_items:
-        if replaced >= need or replaced >= len(available_us_candidates):
-            break
-        to_replace_idxs.add(r["idx"])
-        replaced += 1
-
-    # 새 결과 구성: 교체 대상은 제외, 미국 뉴스로 보충
-    new_result = [r for r in ranked if r["idx"] not in to_replace_idxs]
-    for k, (cand_idx, cand_news) in enumerate(available_us_candidates[:replaced]):
-        new_result.append({
-            "idx": cand_idx,
-            "rank": 999,  # 임시 — 아래에서 재정렬
-            "category": "미국증시",
-            "reason": "🇺🇸 미국 매체 쿼터 보장 (v2.6.2)",
-            "original": cand_news,
-        })
-
-    # rank 재할당 (상위 유지, 신규 추가는 하위에 배치)
-    new_result.sort(key=lambda x: (x["rank"], 0))
-    for k, item in enumerate(new_result, start=1):
-        item["rank"] = k
+    # 기존 선정 순위 유지하기 위해 rank 순으로 정렬
+    ai_us.sort(key=lambda x: x["rank"])
+    ai_kr.sort(key=lambda x: x["rank"])
 
     logger.info(
-        "🇺🇸 미국 뉴스 쿼터 강제 적용: 기존 %d건 → %d건 (교체 %d건, v2.6.2)",
-        current_us_count, current_us_count + replaced, replaced,
+        "Step 1-A) AI 원선정: 미국 %d건, 한국 %d건 → 목표: 미국 %d건, 한국 %d건",
+        len(ai_us), len(ai_kr), target_us, target_kr,
     )
-    return new_result
+
+    # 2) 각 버킷을 목표치로 맞추기 (부족하면 보충, 초과하면 절단)
+    used_idx = set(r["idx"] for r in (ai_us + ai_kr))
+
+    # 미국 보충
+    if len(ai_us) < target_us:
+        need = target_us - len(ai_us)
+        available_us = [
+            (i, n) for i, n in enumerate(all_news)
+            if _is_us_source(n.get("source", "")) and i not in used_idx
+        ]
+        for k, (cand_idx, cand_news) in enumerate(available_us[:need]):
+            ai_us.append({
+                "idx": cand_idx,
+                "rank": 999,  # 임시
+                "category": "미국증시",
+                "reason": "🇺🇸 미국 매체 쿼터 보장 (v2.6.2)",
+                "original": cand_news,
+            })
+            used_idx.add(cand_idx)
+        if len(ai_us) < target_us:
+            logger.warning(
+                "🇺🇸 미국 뉴스 보충 실패: 목표 %d, 확보 %d (원본 후보 부족)",
+                target_us, len(ai_us),
+            )
+
+    # 한국 보충
+    if len(ai_kr) < target_kr:
+        need = target_kr - len(ai_kr)
+        available_kr = [
+            (i, n) for i, n in enumerate(all_news)
+            if not _is_us_source(n.get("source", "")) and i not in used_idx
+        ]
+        for k, (cand_idx, cand_news) in enumerate(available_kr[:need]):
+            ai_kr.append({
+                "idx": cand_idx,
+                "rank": 999,  # 임시
+                "category": "한국증시",
+                "reason": "🇰🇷 한국 매체 쿼터 보장 (v2.6.2)",
+                "original": cand_news,
+            })
+            used_idx.add(cand_idx)
+        if len(ai_kr) < target_kr:
+            logger.warning(
+                "🇰🇷 한국 뉴스 보충 실패: 목표 %d, 확보 %d (원본 후보 부족)",
+                target_kr, len(ai_kr),
+            )
+
+    # 초과분 절단 (하위 rank 제거)
+    ai_us = ai_us[:target_us]
+    ai_kr = ai_kr[:target_kr]
+
+    # 3) 🇺🇸 미국(rank 1~4) + 🇰🇷 한국(rank 5~10) 순서로 재배치
+    final_result: List[Dict[str, Any]] = []
+    for i, item in enumerate(ai_us, start=1):
+        item["rank"] = i
+        final_result.append(item)
+    for i, item in enumerate(ai_kr, start=target_us + 1):
+        item["rank"] = i
+        final_result.append(item)
+
+    logger.info(
+        "✅ v2.6.2 쿼터 강제 적용 완료: 🇺🇸 %d건 (rank 1~%d) + 🇰🇷 %d건 (rank %d~%d) = 총 %d건",
+        len(ai_us), target_us,
+        len(ai_kr), target_us + 1, target_us + target_kr,
+        len(final_result),
+    )
+    return final_result
 
 
 # ════════════════════════════════════════════════════════════
@@ -687,7 +732,15 @@ def assemble_final_briefing(
     item_markdowns: List[str],
     overview: str,
 ) -> str:
-    """10개 요약 + 총평 + 카테고리 배지를 포함한 최종 마크다운 작성."""
+    """
+    v2.6.2: 미국/한국 섹션 분리 레이아웃으로 최종 마크다운 작성.
+
+    구조:
+      1. 헤더 (제목 + 카테고리 구성)
+      2. 오늘의 한 줄 총평
+      3. 🇺🇸 미국 시장 섹션 (rank 1~4)
+      4. 🇰🇷 한국 시장 섹션 (rank 5~10)
+    """
     today = _today_kr_str()
 
     # 카테고리별 집계 (헤더에 표시)
@@ -695,17 +748,34 @@ def assemble_final_briefing(
     cat_counts = Counter(item["category"] for item in ranked_items)
     cat_summary = " · ".join(f"{c} {n}" for c, n in cat_counts.most_common())
 
-    # v2.5.3: 총평을 리포트 맨 위(제목 바로 다음)로 이동
-    # 독자가 메일을 열자마자 스크롤 없이 전체 시장 흐름을 파악할 수 있도록 재배치.
+    # v2.6.2: 미국/한국 뉴스 분류
+    us_indices: List[int] = []
+    kr_indices: List[int] = []
+    for i, item in enumerate(ranked_items):
+        src = item["original"].get("source", "")
+        if _is_us_source(src):
+            us_indices.append(i)
+        else:
+            kr_indices.append(i)
+
+    us_count = len(us_indices)
+    kr_count = len(kr_indices)
+
+    # ──────────────────────────────────────────────────────────
+    # 헤더
+    # ──────────────────────────────────────────────────────────
     header = f"""## 📈 {today} 주식·반도체 일일 브리핑
 
 안녕하세요, 한국 개인투자자 여러분. 오늘 시장에 가장 큰 영향을 미칠 **핵심 뉴스 {len(item_markdowns)}건**을
-순위별로 분석해 드립니다.
+🇺🇸 미국 시장 · 🇰🇷 한국 시장 순으로 분석해 드립니다.
 
-**오늘의 카테고리 구성**: {cat_summary}
+**오늘의 구성**: 🇺🇸 미국 {us_count}건 · 🇰🇷 한국 {kr_count}건 (카테고리: {cat_summary})
 
 """
 
+    # ──────────────────────────────────────────────────────────
+    # 오늘의 한 줄 총평
+    # ──────────────────────────────────────────────────────────
     overview_section = f"""## 🔎 오늘의 한 줄 총평
 
 {overview}
@@ -714,10 +784,34 @@ def assemble_final_briefing(
 
 """
 
-    body = "\n\n".join(item_markdowns)
+    # ──────────────────────────────────────────────────────────
+    # 🇺🇸 미국 시장 섹션 (v2.6.2 신규)
+    # ──────────────────────────────────────────────────────────
+    us_section = ""
+    if us_indices:
+        us_header = f"""## 🇺🇸 미국 시장 ({us_count}건)
 
-    # v2.5.3: header → overview(총평) → body(10개 카드) 순서
-    return header + overview_section + body
+> 간밤 마감한 미국 시장 핵심 뉴스입니다. 반도체·AI·ETF·거시 지표를 중심으로 정리했습니다.
+
+"""
+        us_body = "\n\n".join(item_markdowns[i] for i in us_indices)
+        us_section = us_header + us_body + "\n\n---\n\n"
+
+    # ──────────────────────────────────────────────────────────
+    # 🇰🇷 한국 시장 섹션 (v2.6.2 신규)
+    # ──────────────────────────────────────────────────────────
+    kr_section = ""
+    if kr_indices:
+        kr_header = f"""## 🇰🇷 한국 시장 ({kr_count}건)
+
+> 오늘 한국 시장 개장에 영향을 줄 핵심 뉴스입니다. 반도체·코스피 주도주·정부 정책을 다룹니다.
+
+"""
+        kr_body = "\n\n".join(item_markdowns[i] for i in kr_indices)
+        kr_section = kr_header + kr_body
+
+    # v2.6.2: header → overview → 🇺🇸 미국 → 🇰🇷 한국 순서
+    return header + overview_section + us_section + kr_section
 
 
 # ════════════════════════════════════════════════════════════
