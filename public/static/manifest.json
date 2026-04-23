@@ -1,7 +1,7 @@
 {
   "name": "Morning Stock AI — Briefing Center",
   "short_name": "Morning Stock",
-  "description": "매일 아침 7시 KST 주식·반도체 AI 브리핑 관리 콘솔",
+  "description": "매일 아침 6시 30분 KST 주식·반도체 AI 브리핑 관리 콘솔",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

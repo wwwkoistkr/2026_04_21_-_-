@@ -387,13 +387,13 @@ HTML_TEMPLATE = """\
                          border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;
                          box-shadow:0 4px 12px rgba(0,0,0,0.04);">
             <div style="margin-bottom:8px;">
-              📌 <strong>이 메일은 매일 오전 7시(KST) GitHub Actions 에 의해 자동 발송됩니다.</strong>
+              📌 <strong>이 메일은 매일 오전 6시 30분(KST) GitHub Actions 에 의해 자동 발송됩니다.</strong>
             </div>
             <div style="margin-bottom:6px;">
               🗞️ <strong>원천 데이터</strong>: {sources_summary}
             </div>
             <div style="margin-bottom:6px;">
-              🤖 <strong>요약 엔진</strong>: Google Gemini 2.5 Flash (2단계 파이프라인 v2.5.0)
+              🤖 <strong>요약 엔진</strong>: Google Gemini 2.5 Flash (2단계 파이프라인 v2.5.1)
             </div>
             <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #cbd5e1;color:#94a3b8;">
               ⚠️ 본 브리핑은 정보 제공을 위한 참고용 자료이며, 투자 권유가 아닙니다.<br/>

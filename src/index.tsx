@@ -1,7 +1,7 @@
 /**
  * 🌅 Morning Stock AI Briefing Center
  * ────────────────────────────────────
- * 매일 아침 07:00 (KST) 주식/반도체 브리핑을 자동 발송하는 파이프라인의
+ * 매일 아침 06:30 (KST) 주식/반도체 브리핑을 자동 발송하는 파이프라인의
  * '소스·수신자 관리 웹 콘솔' 입니다.
  *
  * [v2.0] 검색어 기반 확장 수집 기능 추가:
@@ -442,7 +442,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.5.0
+                Daily Briefing Admin v2.5.1
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -453,7 +453,7 @@ app.get('/', (c) => {
               🌅 Morning Stock AI
             </h1>
             <p class="text-xs sm:text-sm opacity-90 mt-1">
-              매일 <strong>07:00 KST</strong> 자동 발송 · 모바일 설치 가능 (홈 화면 추가)
+              매일 <strong>06:30 KST</strong> 자동 발송 · 모바일 설치 가능 (홈 화면 추가)
             </p>
           </div>
           <form method="post" action="/logout" class="flex-shrink-0">
@@ -474,7 +474,7 @@ app.get('/', (c) => {
               지금 즉시 브리핑 발송
             </h2>
             <p class="text-xs sm:text-sm text-gray-600 mt-1">
-              매일 07:00 KST 스케줄과 별도로, <strong>지금 바로</strong> 최신 뉴스를 수집·요약·이메일 발송합니다.
+              매일 06:30 KST 스케줄과 별도로, <strong>지금 바로</strong> 최신 뉴스를 수집·요약·이메일 발송합니다.
               (약 1~3분 소요)
             </p>
             <div id="triggerStatus" class="hidden mt-3 p-3 rounded-lg text-xs sm:text-sm"></div>
@@ -702,7 +702,7 @@ app.get('/', (c) => {
           ① 매일 아침 브리핑을 받을 이메일 주소
         </h2>
         <p class="text-xs sm:text-sm text-gray-500 mb-4">
-          여기 등록된 모든 이메일로 <strong>매일 07:00 KST</strong> 브리핑이 발송됩니다.
+          여기 등록된 모든 이메일로 <strong>매일 06:30 KST</strong> 브리핑이 발송됩니다.
         </p>
         <form id="addRecipientForm" class="grid grid-cols-1 md:grid-cols-[2fr_1fr_auto] gap-2 sm:gap-3">
           <input
@@ -854,8 +854,8 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.5.0</span></p>
-        <p class="mt-1">매일 07:00 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.5.1</span></p>
+        <p class="mt-1">매일 06:30 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
             <i class="fa-solid fa-download"></i> 홈 화면에 설치하기
@@ -2095,7 +2095,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.5.0' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.5.1' })
 )
 
 export default app
