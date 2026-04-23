@@ -9,7 +9,7 @@
  *   - 검색어가 비어있으면 → 해당 사이트의 최신 뉴스 수집 (기존 동작)
  *   - 검색어가 있으면    → Google News RSS 로 site:xxx "검색어" 조합 검색
  *   - 한 소스에 최대 5개 검색어, 각 검색어별 수집 건수 개별 설정
- *   - 카테고리(kr/us/custom) 분리로 UI 탭 구성 (v2.5.2: yt 제거)
+ *   - 카테고리(kr/us/custom) 분리로 UI 탭 구성 (v2.5.3: yt 제거)
  *   - 최초 접속 시 18개 "기본 시드 소스" 를 KV 에 자동 주입
  */
 import { Hono } from 'hono'
@@ -30,7 +30,7 @@ type Bindings = {
   EMAIL_APP_PASSWORD?: string          // 참조용 (Cloudflare Worker 에서는 SMTP 불가)
 }
 
-// v2.5.2: youtube 타입 제거 (서비스 정책상 유튜브 소스 미지원)
+// v2.5.3: youtube 타입 제거 (서비스 정책상 유튜브 소스 미지원)
 type SourceType = 'rss' | 'google_news' | 'web'
 type SourceCategory = 'kr' | 'us' | 'custom'
 
@@ -44,8 +44,8 @@ interface SearchQuery {
 interface NewsSource {
   id: string                 // 고유 ID
   label: string              // 사용자에게 보일 이름
-  category: SourceCategory   // kr / us / custom  (v2.5.2: yt 제거)
-  type: SourceType           // rss / google_news / web  (v2.5.2: youtube 제거)
+  category: SourceCategory   // kr / us / custom  (v2.5.3: yt 제거)
+  type: SourceType           // rss / google_news / web  (v2.5.3: youtube 제거)
   url: string                // (type=rss/web 일 때) 직접 URL
   site?: string              // (type=google_news 일 때) site:xxxx 용 도메인
   queries: SearchQuery[]     // 검색어 배열 (비어있으면 최신순 수집)
@@ -182,7 +182,7 @@ function buildSeedSources(): NewsSource[] {
     mk({ label: 'ETF.com', category: 'us', type: 'google_news', site: 'etf.com', queries: US_ETF_PRESET, url: 'https://etf.com' }),
     mk({ label: 'Morningstar', category: 'us', type: 'google_news', site: 'morningstar.com', queries: US_ETF_PRESET, url: 'https://morningstar.com' }),
 
-    // ── v2.5.2: 유튜브 소스 제거됨 ──
+    // ── v2.5.3: 유튜브 소스 제거됨 ──
   ]
 }
 
@@ -209,7 +209,7 @@ function isValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim())
 }
 
-/** URL 을 자동 판별해서 type 을 결정한다. (v2.5.2: youtube 제거) */
+/** URL 을 자동 판별해서 type 을 결정한다. (v2.5.3: youtube 제거) */
 function detectSourceType(url: string): SourceType {
   const u = url.toLowerCase().trim()
   // 유튜브 URL은 사용자 편의를 위해 RSS로 폴백 (실제 수집은 Python 수집기에서 처리 안 함)
@@ -435,7 +435,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.5.2
+                Daily Briefing Admin v2.5.3
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -796,7 +796,7 @@ app.get('/', (c) => {
           <button data-cat="us" class="cat-tab px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
             🌎 미국 <span class="cat-count">0</span>
           </button>
-          {/* v2.5.2: 유튜브 탭 제거됨 */}
+          {/* v2.5.3: 유튜브 탭 제거됨 */}
           <button data-cat="custom" class="cat-tab px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
             ➕ 사용자 <span class="cat-count">0</span>
           </button>
@@ -845,7 +845,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.5.2</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.5.3</span></p>
         <p class="mt-1">매일 06:30 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -1552,7 +1552,7 @@ app.get('/api/admin/recent-runs', async (c) => {
 
 /**
  * 새 소스 추가
- * v2.5.2: category 파라미터 허용 (kr/us/custom). 기본값 'custom'.
+ * v2.5.3: category 파라미터 허용 (kr/us/custom). 기본값 'custom'.
  *   이전 버그: 클라이언트가 카테고리를 보내도 서버가 무시하고 무조건 'custom' 저장 →
  *   사용자가 "미국"으로 선택해도 "사용자" 탭에 저장되는 문제.
  */
@@ -1563,7 +1563,7 @@ app.post('/api/admin/sources', async (c) => {
   const rawQueries = Array.isArray(body.queries) ? body.queries : []
   const defaultLimit = Math.max(1, Math.min(10, Number(body.defaultLimit) || 5))
 
-  // v2.5.2: 카테고리 화이트리스트 검증 (유튜브 'yt' 제거됨)
+  // v2.5.3: 카테고리 화이트리스트 검증 (유튜브 'yt' 제거됨)
   const ALLOWED_CATEGORIES: SourceCategory[] = ['kr', 'us', 'custom']
   const requestedCategory = String(body.category ?? '').trim() as SourceCategory
   const category: SourceCategory = ALLOWED_CATEGORIES.includes(requestedCategory)
@@ -1576,12 +1576,17 @@ app.post('/api/admin/sources', async (c) => {
   if (!/^https?:\/\//i.test(url)) {
     return c.json({ error: 'URL 은 http:// 또는 https:// 로 시작해야 합니다.' }, 400)
   }
-  // v2.5.2: 유튜브 URL 차단 (서비스 정책)
+  // v2.5.3: 유튜브 URL 차단 (서비스 정책)
   if (url.toLowerCase().includes('youtube.com') || url.toLowerCase().includes('youtu.be')) {
     return c.json({ error: '유튜브 소스는 더 이상 지원되지 않습니다.' }, 400)
   }
 
-  const type = detectSourceType(url)
+  // v2.5.3: 클라이언트가 type 을 명시하면 존중, 없으면 자동 판정 폴백
+  const ALLOWED_TYPES: SourceType[] = ['rss', 'google_news', 'web']
+  const requestedType = String(body.type ?? '').trim() as SourceType
+  const type: SourceType = ALLOWED_TYPES.includes(requestedType)
+    ? requestedType
+    : detectSourceType(url)
   const queries: SearchQuery[] = rawQueries
     .map((q: any) => ({
       keyword: String(q.keyword ?? '').trim(),
@@ -1594,7 +1599,7 @@ app.post('/api/admin/sources', async (c) => {
   const newItem: NewsSource = {
     id: 's_' + Date.now().toString(36),
     label,
-    category,                  // v2.5.2: 클라이언트 지정값 반영
+    category,                  // v2.5.3: 클라이언트 지정값 반영
     type,
     url,
     site: extractSite(url),
@@ -1622,7 +1627,7 @@ app.patch('/api/admin/sources/:id', async (c) => {
   if (typeof body.site === 'string') target.site = body.site.trim() || undefined
   if (typeof body.url === 'string' && body.url.trim()) {
     const newUrl = body.url.trim()
-    // v2.5.2: 유튜브 URL 차단
+    // v2.5.3: 유튜브 URL 차단
     if (newUrl.toLowerCase().includes('youtube.com') || newUrl.toLowerCase().includes('youtu.be')) {
       return c.json({ error: '유튜브 소스는 더 이상 지원되지 않습니다.' }, 400)
     }
@@ -1631,7 +1636,15 @@ app.patch('/api/admin/sources/:id', async (c) => {
   if (typeof body.defaultLimit === 'number') {
     target.defaultLimit = Math.max(1, Math.min(10, body.defaultLimit))
   }
-  // v2.5.2: 카테고리 변경 허용 (kr/us/custom 만)
+  // v2.5.3: 타입 변경 허용 (rss/google_news/web 만) — 기존 'web' 스킵 소스 복구용
+  if (typeof body.type === 'string') {
+    const ALLOWED_TYPES: SourceType[] = ['rss', 'google_news', 'web']
+    const t = body.type.trim() as SourceType
+    if (ALLOWED_TYPES.includes(t)) {
+      target.type = t
+    }
+  }
+  // v2.5.3: 카테고리 변경 허용 (kr/us/custom 만)
   if (typeof body.category === 'string') {
     const ALLOWED: SourceCategory[] = ['kr', 'us', 'custom']
     const cat = body.category.trim() as SourceCategory
@@ -1695,7 +1708,7 @@ app.post('/api/admin/test-source', async (c) => {
     const lang = isKr ? 'hl=ko&gl=KR&ceid=KR:ko' : 'hl=en-US&gl=US&ceid=US:en'
     fetchUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&${lang}`
   }
-  // v2.5.2: 유튜브 분기 제거됨 (서비스 정책상 유튜브 소스 미지원)
+  // v2.5.3: 유튜브 분기 제거됨 (서비스 정책상 유튜브 소스 미지원)
 
   try {
     const ua = fetchUrl.includes('youtube.com/feeds')
@@ -1724,7 +1737,7 @@ app.post('/api/admin/test-source', async (c) => {
   }
 })
 
-// v2.5.2: extractYouTubeChannelId 제거됨 (유튜브 소스 미지원)
+// v2.5.3: extractYouTubeChannelId 제거됨 (유튜브 소스 미지원)
 
 function extractTitles(xml: string): string[] {
   const out: string[] = []
@@ -2111,7 +2124,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.5.2' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.5.3' })
 )
 
 export default app

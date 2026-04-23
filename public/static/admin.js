@@ -531,9 +531,11 @@
       .map((q, i) => queryRowHtml(q?.keyword || '', q?.limit || 3, i))
       .join('')
 
+    // v2.5.3: 수집 방식 기본값 — 기존 소스는 저장값, 신규는 google_news (권장)
+    const currentType = s.type || 'google_news'
     modalBody.innerHTML = `
       <div class="space-y-4">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label class="block text-xs font-semibold text-gray-600 mb-1">표시 이름 <span class="text-red-500">*</span></label>
             <input id="m_label" value="${escapeHtml(s.label)}" required
@@ -547,6 +549,19 @@
               <option value="us" ${s.category === 'us' ? 'selected' : ''}>🌎 미국</option>
               <option value="custom" ${s.category === 'custom' ? 'selected' : ''}>➕ 사용자</option>
             </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">
+              수집 방식 <span class="text-[10px] text-gray-400 font-normal">(v2.5.3)</span>
+            </label>
+            <select id="m_type" class="w-full px-3 py-2 border border-gray-300 rounded text-sm">
+              <option value="google_news" ${currentType === 'google_news' ? 'selected' : ''}>🔎 Google News 검색 (권장)</option>
+              <option value="rss" ${currentType === 'rss' ? 'selected' : ''}>📡 RSS 직접 수집</option>
+              <option value="web" ${currentType === 'web' ? 'selected' : ''}>🌐 Web (수집 불가·스킵)</option>
+            </select>
+            <p class="text-[11px] text-gray-400 mt-1">
+              일반 사이트(reuters.com 등)는 <b>Google News 검색</b> 선택.
+            </p>
           </div>
         </div>
 
@@ -695,6 +710,9 @@
   function collectModalPayload() {
     const label = document.getElementById('m_label').value.trim()
     const category = document.getElementById('m_category').value
+    // v2.5.3: 수집 방식 필드 추가
+    const typeEl = document.getElementById('m_type')
+    const type = typeEl ? typeEl.value : 'google_news'
     const url = document.getElementById('m_url').value.trim()
     const site = document.getElementById('m_site').value.trim()
     const defaultLimit = parseInt(document.getElementById('m_defaultLimit').value, 10) || 5
@@ -705,7 +723,7 @@
       const lm = parseInt(row.querySelector('.q_limit').value, 10) || 3
       if (kw) queries.push({ keyword: kw, limit: Math.max(1, Math.min(10, lm)) })
     })
-    return { label, category, url, site, defaultLimit, enabled, queries }
+    return { label, category, type, url, site, defaultLimit, enabled, queries }
   }
 
   async function onModalTest() {
@@ -748,10 +766,11 @@
     if (!/^https?:\/\//i.test(p.url)) return toast('⚠️ URL 은 http:// 또는 https:// 로 시작해야 합니다.', 'warn')
 
     if (editingSource) {
-      // 편집 (PATCH) — v2.5.2: category 도 전송해서 카테고리 재분류 가능
+      // 편집 (PATCH) — v2.5.3: category + type 전송
       const res = await api.patch(editingSource.id, {
         label: p.label,
-        category: p.category,       // ← v2.5.2: 추가 (카테고리 변경 허용)
+        category: p.category,       // ← v2.5.2: 카테고리 변경 허용
+        type: p.type,               // ← v2.5.3: 수집 방식 변경 허용
         url: p.url,
         site: p.site,
         queries: p.queries,
@@ -770,10 +789,13 @@
       toast(`💾 <strong>${escapeHtml(p.label)}</strong> 저장됨`, 'success')
     } else {
       // 신규 추가 (POST)
-      // v2.5.2 fix: 프론트에서 선택한 category 를 서버로 전송 (이전엔 무시돼서 무조건 'custom' 저장됨)
+      // v2.5.3: category + type 둘 다 명시적으로 전송
+      //   - v2.5.2 fix: category 를 프론트에서 전송 (이전엔 무시돼서 무조건 'custom' 저장됨)
+      //   - v2.5.3 fix: type 도 전송 (이전엔 서버에서 detectSourceType 로 재판정 → 'web' 로 고정됨)
       const res = await api.add({
         label: p.label,
-        category: p.category,     // ← v2.5.2: 추가
+        category: p.category,     // ← v2.5.2
+        type: p.type,             // ← v2.5.3: 수집 방식 전송
         url: p.url,
         queries: p.queries,
         defaultLimit: p.defaultLimit,

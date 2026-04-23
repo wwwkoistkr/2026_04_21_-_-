@@ -506,6 +506,8 @@ def assemble_final_briefing(
     cat_counts = Counter(item["category"] for item in ranked_items)
     cat_summary = " · ".join(f"{c} {n}" for c, n in cat_counts.most_common())
 
+    # v2.5.3: 총평을 리포트 맨 위(제목 바로 다음)로 이동
+    # 독자가 메일을 열자마자 스크롤 없이 전체 시장 흐름을 파악할 수 있도록 재배치.
     header = f"""## 📈 {today} 주식·반도체 일일 브리핑
 
 안녕하세요, 한국 개인투자자 여러분. 오늘 시장에 가장 큰 영향을 미칠 **핵심 뉴스 {len(item_markdowns)}건**을
@@ -513,22 +515,20 @@ def assemble_final_briefing(
 
 **오늘의 카테고리 구성**: {cat_summary}
 
+"""
+
+    overview_section = f"""## 🔎 오늘의 한 줄 총평
+
+{overview}
+
 ---
 
 """
 
     body = "\n\n".join(item_markdowns)
 
-    footer = f"""
-
----
-
-## 🔎 오늘의 한 줄 총평
-
-{overview}
-"""
-
-    return header + body + footer
+    # v2.5.3: header → overview(총평) → body(10개 카드) 순서
+    return header + overview_section + body
 
 
 # ════════════════════════════════════════════════════════════
@@ -632,7 +632,15 @@ def _fallback_rule_based_briefing(news_list: List[Dict[str, str]]) -> str:
         "원본 뉴스를 자동 분석 없이 그대로 제공합니다. 각 원문 링크를 확인해 주세요.\n\n"
     )
 
-    parts = [warning, f"## 📰 {today} 주식·반도체 주요 뉴스\n\n"]
+    # v2.5.3: 총평을 리포트 맨 위로 이동 (폴백 경로도 동일 구조)
+    parts = [
+        warning,
+        f"## 📰 {today} 주식·반도체 주요 뉴스\n\n",
+        "## 🔎 오늘의 한 줄 총평\n\n",
+        "AI 분석 엔진 장애로 자동 총평을 생성하지 못했습니다. "
+        "아래 원본 뉴스들을 직접 확인해 주세요.\n\n",
+        "---\n\n",
+    ]
     for i, n in enumerate(top, start=1):
         title = (n.get("title") or "(제목 없음)")[:120]
         summary = (n.get("summary") or "")[:300]
@@ -644,11 +652,6 @@ def _fallback_rule_based_briefing(news_list: List[Dict[str, str]]) -> str:
             parts.append(f"- **요약**: {summary}\n")
         parts.append(f"- **원문 링크**: [{source}]({link})\n\n")
 
-    parts.append("\n---\n\n## 🔎 오늘의 한 줄 총평\n\n")
-    parts.append(
-        "AI 분석 엔진 장애로 자동 총평을 생성하지 못했습니다. "
-        "위 원본 뉴스들을 직접 확인해 주세요.\n"
-    )
     return "".join(parts)
 
 
