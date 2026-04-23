@@ -9,7 +9,7 @@
  *   - 검색어가 비어있으면 → 해당 사이트의 최신 뉴스 수집 (기존 동작)
  *   - 검색어가 있으면    → Google News RSS 로 site:xxx "검색어" 조합 검색
  *   - 한 소스에 최대 5개 검색어, 각 검색어별 수집 건수 개별 설정
- *   - 카테고리(kr/us/yt/custom) 분리로 UI 탭 구성
+ *   - 카테고리(kr/us/custom) 분리로 UI 탭 구성 (v2.5.2: yt 제거)
  *   - 최초 접속 시 18개 "기본 시드 소스" 를 KV 에 자동 주입
  */
 import { Hono } from 'hono'
@@ -30,8 +30,9 @@ type Bindings = {
   EMAIL_APP_PASSWORD?: string          // 참조용 (Cloudflare Worker 에서는 SMTP 불가)
 }
 
-type SourceType = 'rss' | 'google_news' | 'youtube' | 'web'
-type SourceCategory = 'kr' | 'us' | 'yt' | 'custom'
+// v2.5.2: youtube 타입 제거 (서비스 정책상 유튜브 소스 미지원)
+type SourceType = 'rss' | 'google_news' | 'web'
+type SourceCategory = 'kr' | 'us' | 'custom'
 
 /** 개별 검색어 질의 */
 interface SearchQuery {
@@ -43,9 +44,9 @@ interface SearchQuery {
 interface NewsSource {
   id: string                 // 고유 ID
   label: string              // 사용자에게 보일 이름
-  category: SourceCategory   // kr / us / yt / custom
-  type: SourceType           // rss / google_news / youtube / web
-  url: string                // (type=rss/web/youtube 일 때) 직접 URL
+  category: SourceCategory   // kr / us / custom  (v2.5.2: yt 제거)
+  type: SourceType           // rss / google_news / web  (v2.5.2: youtube 제거)
+  url: string                // (type=rss/web 일 때) 직접 URL
   site?: string              // (type=google_news 일 때) site:xxxx 용 도메인
   queries: SearchQuery[]     // 검색어 배열 (비어있으면 최신순 수집)
   defaultLimit: number       // queries 가 비어있을 때 기본 수집 개수
@@ -181,15 +182,7 @@ function buildSeedSources(): NewsSource[] {
     mk({ label: 'ETF.com', category: 'us', type: 'google_news', site: 'etf.com', queries: US_ETF_PRESET, url: 'https://etf.com' }),
     mk({ label: 'Morningstar', category: 'us', type: 'google_news', site: 'morningstar.com', queries: US_ETF_PRESET, url: 'https://morningstar.com' }),
 
-    // ── 📺 유튜브 (검색어 없이 최신 영상) ──
-    mk({
-      label: '디일렉 (THEELEC)',
-      category: 'yt',
-      type: 'youtube',
-      url: 'https://www.youtube.com/channel/UC2GRwEADsEKEX5k-Xg9YphA',
-      queries: [],
-      defaultLimit: 5,
-    }),
+    // ── v2.5.2: 유튜브 소스 제거됨 ──
   ]
 }
 
@@ -216,10 +209,10 @@ function isValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.trim())
 }
 
-/** URL 을 자동 판별해서 type 을 결정한다. */
+/** URL 을 자동 판별해서 type 을 결정한다. (v2.5.2: youtube 제거) */
 function detectSourceType(url: string): SourceType {
   const u = url.toLowerCase().trim()
-  if (u.includes('youtube.com') || u.includes('youtu.be')) return 'youtube'
+  // 유튜브 URL은 사용자 편의를 위해 RSS로 폴백 (실제 수집은 Python 수집기에서 처리 안 함)
   if (u.includes('news.google.com/rss')) return 'google_news'
   if (u.endsWith('.xml') || u.includes('/rss') || u.includes('/feed')) return 'rss'
   return 'web'
@@ -442,7 +435,7 @@ app.get('/', (c) => {
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-[10px] sm:text-xs uppercase tracking-widest opacity-80">
-                Daily Briefing Admin v2.5.1
+                Daily Briefing Admin v2.5.2
               </span>
               <span id="syncIndicator" class="hidden sm:inline-flex items-center gap-1 text-[10px] bg-white/20 px-2 py-0.5 rounded-full" title="PC ↔ 모바일 실시간 동기화 중">
                 <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-300 animate-pulse"></span>
@@ -803,9 +796,7 @@ app.get('/', (c) => {
           <button data-cat="us" class="cat-tab px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
             🌎 미국 <span class="cat-count">0</span>
           </button>
-          <button data-cat="yt" class="cat-tab px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
-            📺 유튜브 <span class="cat-count">0</span>
-          </button>
+          {/* v2.5.2: 유튜브 탭 제거됨 */}
           <button data-cat="custom" class="cat-tab px-4 py-2 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap">
             ➕ 사용자 <span class="cat-count">0</span>
           </button>
@@ -854,7 +845,7 @@ app.get('/', (c) => {
 
       {/* 푸터 */}
       <footer class="text-center text-xs text-gray-400 mt-6 sm:mt-8 pb-4">
-        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.5.1</span></p>
+        <p>Morning Stock AI Briefing Center <span class="font-semibold">v2.5.2</span></p>
         <p class="mt-1">매일 06:30 KST · GitHub Actions · 모바일 홈 화면 추가 지원</p>
         <p class="mt-2">
           <button id="btnInstallPwa" class="hidden text-blue-600 underline">
@@ -1559,7 +1550,12 @@ app.get('/api/admin/recent-runs', async (c) => {
   }
 })
 
-/** 새 소스 추가 (사용자 추가는 category=custom 으로 저장) */
+/**
+ * 새 소스 추가
+ * v2.5.2: category 파라미터 허용 (kr/us/custom). 기본값 'custom'.
+ *   이전 버그: 클라이언트가 카테고리를 보내도 서버가 무시하고 무조건 'custom' 저장 →
+ *   사용자가 "미국"으로 선택해도 "사용자" 탭에 저장되는 문제.
+ */
 app.post('/api/admin/sources', async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const label = String(body.label ?? '').trim()
@@ -1567,11 +1563,22 @@ app.post('/api/admin/sources', async (c) => {
   const rawQueries = Array.isArray(body.queries) ? body.queries : []
   const defaultLimit = Math.max(1, Math.min(10, Number(body.defaultLimit) || 5))
 
+  // v2.5.2: 카테고리 화이트리스트 검증 (유튜브 'yt' 제거됨)
+  const ALLOWED_CATEGORIES: SourceCategory[] = ['kr', 'us', 'custom']
+  const requestedCategory = String(body.category ?? '').trim() as SourceCategory
+  const category: SourceCategory = ALLOWED_CATEGORIES.includes(requestedCategory)
+    ? requestedCategory
+    : 'custom'
+
   if (!label || !url) {
     return c.json({ error: 'label 과 url 은 필수입니다.' }, 400)
   }
   if (!/^https?:\/\//i.test(url)) {
     return c.json({ error: 'URL 은 http:// 또는 https:// 로 시작해야 합니다.' }, 400)
+  }
+  // v2.5.2: 유튜브 URL 차단 (서비스 정책)
+  if (url.toLowerCase().includes('youtube.com') || url.toLowerCase().includes('youtu.be')) {
+    return c.json({ error: '유튜브 소스는 더 이상 지원되지 않습니다.' }, 400)
   }
 
   const type = detectSourceType(url)
@@ -1587,7 +1594,7 @@ app.post('/api/admin/sources', async (c) => {
   const newItem: NewsSource = {
     id: 's_' + Date.now().toString(36),
     label,
-    category: 'custom',
+    category,                  // v2.5.2: 클라이언트 지정값 반영
     type,
     url,
     site: extractSite(url),
@@ -1613,9 +1620,24 @@ app.patch('/api/admin/sources/:id', async (c) => {
   if (typeof body.enabled === 'boolean') target.enabled = body.enabled
   if (typeof body.label === 'string' && body.label.trim()) target.label = body.label.trim()
   if (typeof body.site === 'string') target.site = body.site.trim() || undefined
-  if (typeof body.url === 'string' && body.url.trim()) target.url = body.url.trim()
+  if (typeof body.url === 'string' && body.url.trim()) {
+    const newUrl = body.url.trim()
+    // v2.5.2: 유튜브 URL 차단
+    if (newUrl.toLowerCase().includes('youtube.com') || newUrl.toLowerCase().includes('youtu.be')) {
+      return c.json({ error: '유튜브 소스는 더 이상 지원되지 않습니다.' }, 400)
+    }
+    target.url = newUrl
+  }
   if (typeof body.defaultLimit === 'number') {
     target.defaultLimit = Math.max(1, Math.min(10, body.defaultLimit))
+  }
+  // v2.5.2: 카테고리 변경 허용 (kr/us/custom 만)
+  if (typeof body.category === 'string') {
+    const ALLOWED: SourceCategory[] = ['kr', 'us', 'custom']
+    const cat = body.category.trim() as SourceCategory
+    if (ALLOWED.includes(cat)) {
+      target.category = cat
+    }
   }
   if (Array.isArray(body.queries)) {
     target.queries = body.queries
@@ -1672,10 +1694,8 @@ app.post('/api/admin/test-source', async (c) => {
     const isKr = /\.(kr|co\.kr)$/i.test(siteClean)
     const lang = isKr ? 'hl=ko&gl=KR&ceid=KR:ko' : 'hl=en-US&gl=US&ceid=US:en'
     fetchUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&${lang}`
-  } else if (type === 'youtube') {
-    const channelId = extractYouTubeChannelId(url)
-    if (channelId) fetchUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`
   }
+  // v2.5.2: 유튜브 분기 제거됨 (서비스 정책상 유튜브 소스 미지원)
 
   try {
     const ua = fetchUrl.includes('youtube.com/feeds')
@@ -1704,11 +1724,7 @@ app.post('/api/admin/test-source', async (c) => {
   }
 })
 
-function extractYouTubeChannelId(url: string): string | null {
-  const m1 = url.match(/youtube\.com\/channel\/([A-Za-z0-9_-]+)/)
-  if (m1) return m1[1]
-  return null
-}
+// v2.5.2: extractYouTubeChannelId 제거됨 (유튜브 소스 미지원)
 
 function extractTitles(xml: string): string[] {
   const out: string[] = []
@@ -2095,7 +2111,7 @@ app.get('/api/public/recipients', async (c) => {
 })
 
 app.get('/api/health', (c) =>
-  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.5.1' })
+  c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.5.2' })
 )
 
 export default app

@@ -176,17 +176,16 @@
   // ═════════════════════════════════════════════════════════════
   // 유틸
   // ═════════════════════════════════════════════════════════════
+  // v2.5.2: 유튜브 카테고리 제거
   const CATEGORY_META = {
     kr: { icon: '🇰🇷', name: '한국' },
     us: { icon: '🌎', name: '미국' },
-    yt: { icon: '📺', name: '유튜브' },
     custom: { icon: '➕', name: '사용자' },
   }
 
   const TYPE_LABEL = {
     rss: 'RSS',
     google_news: 'Google News',
-    youtube: 'YouTube',
     web: 'Web',
   }
 
@@ -222,7 +221,6 @@
     const typeColor = {
       rss: 'bg-purple-100 text-purple-700',
       google_news: 'bg-blue-100 text-blue-700',
-      youtube: 'bg-red-100 text-red-700',
       web: 'bg-gray-100 text-gray-700',
     }[type] || 'bg-gray-100 text-gray-700'
     const enabledBadge = enabled
@@ -262,12 +260,31 @@
         t.classList.remove('border-transparent', 'text-gray-500')
         currentCategory = t.dataset.cat
         renderSources()
+        updateAddButtonState()  // v2.5.2
       })
     })
   }
 
+  // v2.5.2: "새 소스 추가" 는 '사용자' 또는 '전체' 탭에서만 활성화
+  //   → 이후 편집 화면에서 카테고리를 kr/us/custom 중 선택해서 재분류
+  function updateAddButtonState() {
+    const btn = document.getElementById('btnAddSource')
+    if (!btn) return
+    const allowed = (currentCategory === 'custom' || currentCategory === 'all')
+    if (allowed) {
+      btn.disabled = false
+      btn.classList.remove('opacity-50', 'cursor-not-allowed')
+      btn.title = '새 소스를 추가합니다 (카테고리는 편집 창에서 선택)'
+    } else {
+      btn.disabled = true
+      btn.classList.add('opacity-50', 'cursor-not-allowed')
+      btn.title = '새 소스 추가는 "사용자" 탭에서만 가능합니다. 추가 후 편집에서 카테고리(한국/미국)로 변경하세요.'
+    }
+  }
+
   function updateCategoryCounts() {
-    const counts = { all: allSources.length, kr: 0, us: 0, yt: 0, custom: 0 }
+    // v2.5.2: 유튜브 카운트 제거
+    const counts = { all: allSources.length, kr: 0, us: 0, custom: 0 }
     allSources.forEach((s) => {
       if (counts[s.category] !== undefined) counts[s.category]++
     })
@@ -528,7 +545,6 @@
             <select id="m_category" class="w-full px-3 py-2 border border-gray-300 rounded text-sm">
               <option value="kr" ${s.category === 'kr' ? 'selected' : ''}>🇰🇷 한국</option>
               <option value="us" ${s.category === 'us' ? 'selected' : ''}>🌎 미국</option>
-              <option value="yt" ${s.category === 'yt' ? 'selected' : ''}>📺 유튜브</option>
               <option value="custom" ${s.category === 'custom' ? 'selected' : ''}>➕ 사용자</option>
             </select>
           </div>
@@ -545,7 +561,7 @@
             <p class="text-[11px] text-gray-400 mt-1">검색어가 있으면 <code>site:도메인 "검색어"</code> 로 Google News 수집합니다.</p>
           </div>
           <div>
-            <label class="block text-xs font-semibold text-gray-600 mb-1">URL (홈/RSS/유튜브 채널)</label>
+            <label class="block text-xs font-semibold text-gray-600 mb-1">URL (홈 또는 RSS)</label>
             <input id="m_url" value="${escapeHtml(s.url || '')}"
               placeholder="https://example.com 또는 RSS URL"
               class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500">
@@ -732,9 +748,10 @@
     if (!/^https?:\/\//i.test(p.url)) return toast('⚠️ URL 은 http:// 또는 https:// 로 시작해야 합니다.', 'warn')
 
     if (editingSource) {
-      // 편집 (PATCH)
+      // 편집 (PATCH) — v2.5.2: category 도 전송해서 카테고리 재분류 가능
       const res = await api.patch(editingSource.id, {
         label: p.label,
+        category: p.category,       // ← v2.5.2: 추가 (카테고리 변경 허용)
         url: p.url,
         site: p.site,
         queries: p.queries,
@@ -743,13 +760,20 @@
       })
       if (res?.error) return toast('❌ ' + res.error, 'error')
       closeModal()
+      // v2.5.2: 카테고리를 바꿨으면 해당 탭으로 자동 이동
+      if (p.category && p.category !== editingSource.category && p.category !== currentCategory) {
+        const tab = document.querySelector(`.cat-tab[data-cat="${p.category}"]`)
+        if (tab) tab.click()
+      }
       await reload()
       notifyOtherTabs('sources')
       toast(`💾 <strong>${escapeHtml(p.label)}</strong> 저장됨`, 'success')
     } else {
-      // 신규 추가 (POST) — category 는 서버가 'custom' 으로 강제
+      // 신규 추가 (POST)
+      // v2.5.2 fix: 프론트에서 선택한 category 를 서버로 전송 (이전엔 무시돼서 무조건 'custom' 저장됨)
       const res = await api.add({
         label: p.label,
+        category: p.category,     // ← v2.5.2: 추가
         url: p.url,
         queries: p.queries,
         defaultLimit: p.defaultLimit,
@@ -760,9 +784,15 @@
         await api.patch(res.source.id, { site: p.site, enabled: p.enabled })
       }
       closeModal()
+      // v2.5.2: 저장한 카테고리 탭으로 자동 이동하여 결과가 바로 보이게
+      const targetCat = p.category || 'custom'
+      if (targetCat !== currentCategory && targetCat !== 'all') {
+        const tab = document.querySelector(`.cat-tab[data-cat="${targetCat}"]`)
+        if (tab) tab.click()
+      }
       await reload()
       notifyOtherTabs('sources')
-      toast(`✨ <strong>${escapeHtml(p.label)}</strong> 추가됨`, 'success')
+      toast(`✨ <strong>${escapeHtml(p.label)}</strong> 추가됨 (${CATEGORY_META[targetCat]?.name || '사용자'})`, 'success')
     }
   }
 
@@ -1234,8 +1264,14 @@
       if (e.target === modal) closeModal()
     })
 
-    // 새 소스 추가 버튼
-    document.getElementById('btnAddSource').addEventListener('click', openAddModal)
+    // 새 소스 추가 버튼 (v2.5.2: 사용자/전체 탭에서만 활성)
+    document.getElementById('btnAddSource').addEventListener('click', () => {
+      if (currentCategory !== 'custom' && currentCategory !== 'all') {
+        toast('⚠️ 새 소스 추가는 "사용자" 탭에서 하세요. 추가 후 편집 화면에서 카테고리를 한국/미국으로 바꿀 수 있습니다.', 'warn')
+        return
+      }
+      openAddModal()
+    })
 
     // 기본값 복원
     document.getElementById('btnResetDefaults').addEventListener('click', async () => {
@@ -2413,7 +2449,7 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.5.0 초기화 중…')
+  console.log('[MorningStock] Admin v2.5.2 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
@@ -2424,5 +2460,6 @@
   reloadRecipients()
   checkTriggerConfig()
   startSyncPolling()
-  console.log('[MorningStock] 초기화 완료. PC↔모바일 실시간 동기화 + 수집 대시보드 활성화.')
+  updateAddButtonState()  // v2.5.2: 초기 탭(all)에 맞춰 버튼 상태 설정
+  console.log('[MorningStock] v2.5.2 초기화 완료 (카테고리 저장 버그 수정 + 유튜브 제거).')
 })()
