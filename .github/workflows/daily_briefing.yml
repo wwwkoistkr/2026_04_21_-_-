@@ -1,9 +1,14 @@
-name: Morning Stock AI — Daily Briefing
+name: Morning Stock AI — Daily Briefing (Legacy Single-Stage)
+
+# ═══════════════════════════════════════════════════════════════
+# v2.6.0 부터는 3단계 파이프라인(01_collect, 02_summarize, 03_send)이
+# 기본 경로입니다.
+# 이 레거시 단일 단계 워크플로우는 "지금 발송" 버튼 / 긴급 수동 테스트
+# 용도로만 workflow_dispatch 로 트리거할 수 있도록 스케줄은 제거했습니다.
+# ═══════════════════════════════════════════════════════════════
 
 on:
-  schedule:
-    # v2.5.1: 매일 06:30 KST (= 21:30 UTC)
-    - cron: '30 21 * * *'
+  # v2.6.0: schedule 제거 — 3단계 파이프라인이 cron 을 담당.
   workflow_dispatch:
     inputs:
       dry_run:
@@ -46,7 +51,9 @@ jobs:
           BRIEFING_ADMIN_API:   ${{ secrets.BRIEFING_ADMIN_API }}
           BRIEFING_READ_TOKEN:  ${{ secrets.BRIEFING_READ_TOKEN }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-        run: python main.py
+          SUMMARY_MODE:           ${{ secrets.SUMMARY_MODE || 'sequential' }}
+          SUMMARY_CALL_DELAY_SEC: ${{ secrets.SUMMARY_CALL_DELAY_SEC || '6' }}
+        run: python main.py all
 
       - name: Upload HTML preview (dry run only)
         if: ${{ always() && github.event.inputs.dry_run == 'true' }}
