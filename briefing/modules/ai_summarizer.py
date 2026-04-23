@@ -130,10 +130,23 @@ def _build_ranking_prompt(news_list: List[Dict[str, str]]) -> str:
 아래 후보 뉴스 {len(news_list)}건 중, 오늘 투자자에게 가장 중요한 **핵심 뉴스 정확히 {TARGET_NEWS_COUNT}개**를
 순위를 매겨 선정해 주세요.
 
+## 🚨 필수 카테고리 최소 비율 (v2.6.2 - 반드시 준수)
+반드시 아래 카테고리별 **최소 수량**을 지켜 선정하세요.
+국내 편향을 방지하고 글로벌 시황을 균형 있게 전달하기 위함입니다.
+
+| 카테고리 | 최소 필수 건수 | 설명 |
+|---------|-------------|------|
+| 🇺🇸 **미국증시/해외** | **최소 3건** | Seeking Alpha, Reuters, Bloomberg, ETF.com, Morningstar 등 영문 매체 출처 |
+| 💻 반도체 | 최소 2건 | HBM, 파운드리, 삼성전자, SK하이닉스, TSMC, 마이크론, 엔비디아 |
+| 🤖 AI | 최소 1건 | 엔비디아, AMD, AI 인프라/반도체 관련 |
+| 🇰🇷 한국증시 | 최소 2건 | 코스피/코스닥 주요 이슈, 정부 정책 |
+
+**합계: 최소 8건 (미국 3 + 반도체 2 + AI 1 + 한국 2) + 나머지 2건은 자유 선택**
+
 ## 선정 우선순위
 1. 반도체 (HBM, 파운드리, 메모리, SK하이닉스, 삼성전자, TSMC, 마이크론)
 2. AI (엔비디아, AMD, AI 인프라 투자)
-3. 미국 증시 · ETF · 거시 (나스닥, S&P, 환율, 금리, 연준)
+3. **미국 증시 · ETF · 거시 (나스닥, S&P, 환율, 금리, 연준) — 반드시 3건 이상 포함**
 4. 한국 증시 주요 이슈 (코스피/코스닥 주도주, 정부 정책)
 5. 기타 시장 영향도 큰 기업/산업 뉴스
 
@@ -141,6 +154,15 @@ def _build_ranking_prompt(news_list: List[Dict[str, str]]) -> str:
 - 광고성·이벤트·당첨 공지
 - 동일 사건 중복 기사 (→ 가장 정보가 풍부한 1건만 선택)
 - 시장 영향이 없는 단순 인사·사회 뉴스
+
+## 💡 미국 매체 식별 팁
+후보 뉴스의 `(출처)` 부분이 다음 중 하나이면 **미국 뉴스**입니다:
+- Seeking Alpha / Seeking Alpha (ETF)
+- Reuters / Bloomberg
+- ETF.com / Morningstar
+
+이 미국 매체 뉴스는 **제목이 영어**일 수 있지만 한국 투자자에게도 중요하므로
+반드시 Top 10 중 **3건 이상** 포함해 주세요.
 
 ## 출력 형식 (반드시 순수 JSON 배열만, 설명 문장 없이)
 ```json
@@ -157,7 +179,9 @@ def _build_ranking_prompt(news_list: List[Dict[str, str]]) -> str:
 
 {news_block}
 
-위 {len(news_list)}건 중 정확히 {TARGET_NEWS_COUNT}개를 선정해, JSON 배열로만 답변하세요.
+위 {len(news_list)}건 중 정확히 {TARGET_NEWS_COUNT}개를 선정하되,
+🇺🇸 미국 매체(Seeking Alpha/Reuters/Bloomberg/ETF.com/Morningstar) 뉴스를
+**반드시 3건 이상** 포함해야 합니다. JSON 배열로만 답변하세요.
 """
 
 
@@ -313,8 +337,110 @@ def rank_top_news(
                     "original": n,
                 })
     result = result[:TARGET_NEWS_COUNT]
+
+    # ─────────────────────────────────────────────────────────────
+    # v2.6.2: 🇺🇸 미국 뉴스 최소 쿼터 강제 보장 (AI 편향 방지 안전장치)
+    # ─────────────────────────────────────────────────────────────
+    # AI 프롬프트에 "미국 3건 이상" 을 명시했지만,
+    # Gemini 가 한글 후보에 편향될 경우를 대비해 **코드 레벨** 에서도
+    # 미국 매체 뉴스의 최소 수량을 강제로 끼워 넣는다.
+    result = _enforce_us_quota(result, news_list, seen_idx, min_us=US_MIN_QUOTA)
+
     logger.info("Step 1) 최종 선정: %d건", len(result))
     return result
+
+
+# ═══════════════════════════════════════════════════════════════
+# v2.6.2: 미국 매체 식별 및 최소 쿼터 강제 로직
+# ═══════════════════════════════════════════════════════════════
+US_SOURCE_KEYWORDS = (
+    "Seeking Alpha", "Reuters", "Bloomberg",
+    "ETF.com", "Morningstar",
+)
+US_MIN_QUOTA = 3  # Top 10 중 미국 뉴스 최소 보장 건수
+
+
+def _is_us_source(source: str) -> bool:
+    """출처명이 미국 매체인지 확인. 대소문자 무시, 부분 일치."""
+    if not source:
+        return False
+    s = source.strip()
+    for kw in US_SOURCE_KEYWORDS:
+        if kw.lower() in s.lower():
+            return True
+    return False
+
+
+def _enforce_us_quota(
+    ranked: List[Dict[str, Any]],
+    all_news: List[Dict[str, str]],
+    seen_idx: set,
+    min_us: int = US_MIN_QUOTA,
+) -> List[Dict[str, Any]]:
+    """
+    Top 10 결과에 미국 매체 뉴스가 ``min_us`` 건 미만이면,
+    후보 목록의 미채택 미국 뉴스로 하위 랭크를 강제 교체한다.
+
+    - 기존 Top ``min_us`` 건 (상위권) 은 보존.
+    - 하위 (rank 10, 9, 8 ...) 항목을 미국 뉴스로 교체.
+    """
+    current_us = [r for r in ranked if _is_us_source(r["original"].get("source", ""))]
+    current_us_count = len(current_us)
+
+    if current_us_count >= min_us:
+        logger.info(
+            "🇺🇸 미국 뉴스 %d건 포함 (쿼터 %d 충족) — 교체 불필요",
+            current_us_count, min_us,
+        )
+        return ranked
+
+    need = min_us - current_us_count
+    # 후보 목록에서 아직 선정 안 된 미국 뉴스 찾기
+    available_us_candidates = [
+        (i, n) for i, n in enumerate(all_news)
+        if _is_us_source(n.get("source", "")) and i not in seen_idx
+    ]
+
+    if not available_us_candidates:
+        logger.warning(
+            "🇺🇸 미국 뉴스 쿼터 부족(%d/%d) 이지만 후보에도 미국 뉴스 없음 — 스킵",
+            current_us_count, min_us,
+        )
+        return ranked
+
+    # 하위 rank 부터 교체 대상 선정 (미국 뉴스는 제외하고)
+    non_us_items = [r for r in ranked if not _is_us_source(r["original"].get("source", ""))]
+    non_us_items.sort(key=lambda x: x["rank"], reverse=True)  # 하위 rank 우선
+
+    replaced = 0
+    to_replace_idxs = set()
+    for r in non_us_items:
+        if replaced >= need or replaced >= len(available_us_candidates):
+            break
+        to_replace_idxs.add(r["idx"])
+        replaced += 1
+
+    # 새 결과 구성: 교체 대상은 제외, 미국 뉴스로 보충
+    new_result = [r for r in ranked if r["idx"] not in to_replace_idxs]
+    for k, (cand_idx, cand_news) in enumerate(available_us_candidates[:replaced]):
+        new_result.append({
+            "idx": cand_idx,
+            "rank": 999,  # 임시 — 아래에서 재정렬
+            "category": "미국증시",
+            "reason": "🇺🇸 미국 매체 쿼터 보장 (v2.6.2)",
+            "original": cand_news,
+        })
+
+    # rank 재할당 (상위 유지, 신규 추가는 하위에 배치)
+    new_result.sort(key=lambda x: (x["rank"], 0))
+    for k, item in enumerate(new_result, start=1):
+        item["rank"] = k
+
+    logger.info(
+        "🇺🇸 미국 뉴스 쿼터 강제 적용: 기존 %d건 → %d건 (교체 %d건, v2.6.2)",
+        current_us_count, current_us_count + replaced, replaced,
+    )
+    return new_result
 
 
 # ════════════════════════════════════════════════════════════
