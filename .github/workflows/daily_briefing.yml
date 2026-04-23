@@ -1,9 +1,6 @@
 name: Morning Stock AI — Daily Briefing
 
 on:
-  name: Morning Stock AI — Daily Briefing
-
-on:
   schedule:
     # v2.5.1: 매일 06:30 KST (= 21:30 UTC)
     - cron: '30 21 * * *'
@@ -18,7 +15,6 @@ jobs:
   run-briefing:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # v2.2.4: Node 20 deprecation 경고 억제 (GitHub Actions 런너가 Node 24 강제 사용)
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
@@ -38,23 +34,17 @@ jobs:
 
       - name: Run briefing pipeline
         env:
-          # AI 요약 - Gemini (기본)
           GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
-          # AI 요약 - OpenAI fallback (Gemini 503/할당량 초과 시 자동 전환, v2.2.5+)
           OPENAI_API_KEY:       ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL:      ${{ secrets.OPENAI_BASE_URL }}
           OPENAI_MODEL:         ${{ secrets.OPENAI_MODEL }}
-          # 이메일 발송
           EMAIL_SENDER:         ${{ secrets.EMAIL_SENDER }}
           EMAIL_APP_PASSWORD:   ${{ secrets.EMAIL_APP_PASSWORD }}
           EMAIL_RECIPIENTS:     ${{ secrets.EMAIL_RECIPIENTS }}
-          # YouTube 수집
           YOUTUBE_API_KEY:      ${{ secrets.YOUTUBE_API_KEY }}
           THELEC_YOUTUBE_CHANNEL_ID: ${{ secrets.THELEC_YOUTUBE_CHANNEL_ID }}
-          # 관리 콘솔 연동 (수신자·소스 동기화)
           BRIEFING_ADMIN_API:   ${{ secrets.BRIEFING_ADMIN_API }}
           BRIEFING_READ_TOKEN:  ${{ secrets.BRIEFING_READ_TOKEN }}
-          # 드라이런 플래그
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: python main.py
 
