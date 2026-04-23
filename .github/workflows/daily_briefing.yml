@@ -2,8 +2,8 @@ name: Morning Stock AI — Daily Briefing
 
 on:
   schedule:
-    - cron: '0 22 * * *'
-  workflow_dispatch:
+    - cron: '- cron: '30 21 * * *'
+    workflow_dispatch:
     inputs:
       dry_run:
         description: "DRY_RUN(true 이면 메일 발송 생략)"
