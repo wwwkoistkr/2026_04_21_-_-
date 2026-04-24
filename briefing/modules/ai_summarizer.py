@@ -1,5 +1,25 @@
 """
-[v2.6.3] Gemini/OpenAI 호환 API 기반 2단계 요약 엔진 (OpenAI fallback 강화).
+[v2.7.0] 숫자·금액 중심 4줄 귀납법 포맷 (2026-04-24) + Gemini/OpenAI 2단계 엔진.
+
+## v2.7.0 핵심 수정 (2026-04-24)
+----------------------------------------------------
+기존 v2.6.3 은 뉴스 1건당 500~700자 5~7문장의 서술형 요약을 생성했으나
+수치 포함도가 낮고 모바일에서 스크롤이 길다는 피드백 반영.
+
+### v2.7.0 포맷 변경
+  1) `_build_item_prompt()` — 4줄 귀납법 프롬프트로 교체:
+     💰(수치) / 📊(배경) / 🔍(구조) / 📈(결론) 4줄 강제.
+  2) `_is_item_output_valid()` — 4개 이모지 라인 + 숫자 3개 이상 검증.
+  3) `_fallback_item_markdown()` — 동일 4줄 포맷으로 통일.
+  4) `MIN_ITEM_CHARS` 250 → 150 축소 (4줄은 짧으니까).
+
+### 기대 효과
+  - 1건 분량 500~700자 → 150~250자 (60% 축소)
+  - 숫자 포함도 평균 0~2개 → 4~8개
+  - 모바일 한 화면에 2~3건 노출
+  - OpenAI 토큰 비용 약 60% 절감
+
+## v2.6.3 (2026-04-23): Gemini/OpenAI 2단계 엔진 + OpenAI fallback 강화 (유지).
 
 ## v2.6.3 핵심 수정 (2026-04-23)
 ----------------------------------------------------
@@ -77,7 +97,7 @@ MAX_OUTPUT_TOKENS = 8192        # Gemini 2.5 Flash의 max
 TARGET_NEWS_COUNT = 10          # 최종 출력 뉴스 개수
 
 # 개별 뉴스 요약 기준
-MIN_ITEM_CHARS = 250            # 뉴스 1건의 최소 글자수
+MIN_ITEM_CHARS = 150            # v2.7.0: 250→150 (4줄 귀납법 포맷, 숫자 밀도↑)
 ITEM_MAX_OUTPUT_TOKENS = 1024   # 1건 요약에 충분 (한국어 약 500~700자)
 
 # ─── v2.6.0: 순차 호출/페이싱 (Gemini 무료 티어 RPM 제한 대응) ────
@@ -597,32 +617,33 @@ def _build_item_prompt(item: Dict[str, Any]) -> str:
     rank = item["rank"]
     category = item.get("category", "기타")
 
-    # v2.6.0: 원문 본문을 최대 1500자까지 확장 (기존 500자 → 1500자)
-    # 이유: 원문 스크래핑(trafilatura)으로 얻은 풍부한 본문을 AI에게 충분히 전달해
-    #       "제목만 바꿔 쓴 요약"이 아닌 "본문을 근거로 한 서술형 3문장+" 생성 유도.
+    # v2.7.0: 4줄 귀납법 포맷 (숫자·금액 중심, 컴팩트)
+    # 원문 본문은 최대 ITEM_PROMPT_BODY_CHARS 까지 전달해 구체 수치 추출 유도.
     body_chars = ITEM_PROMPT_BODY_CHARS
     return f"""당신은 한국 개인투자자를 위한 시니어 애널리스트입니다.
 오늘은 **{today}** (KST) 입니다.
 
-아래 뉴스 1건을 **투자자 관점에서 깊이 있게 분석**하여 마크다운으로 작성하세요.
+아래 뉴스 1건을 **숫자·금액 중심의 4줄 귀납법**으로 압축 요약하세요.
+읽는 데 10~15초 이내로 끝나야 하며, 각 줄은 **독립된 한 문장**입니다.
 
-## 절대 준수 사항
-1. **분량**: 전체 응답은 **최소 {MIN_ITEM_CHARS}자 이상** (요약 본문 **반드시 최소 3문장, 권장 4~5문장**의 서술형).
-2. **서술형**: 요약 섹션은 "● ●" 같은 불릿이나 단편적 구절 나열이 아닌, **완결된 문장 3문장 이상**으로 작성.
-   (예: "삼성전자가 ~를 발표했다. 이는 ~ 때문이며, 업계에서는 ~로 평가한다. 특히 ~가 주목된다.")
-3. **원문 활용**: 아래 '원본 뉴스 정보'의 **요약 본문을 근거로** 배경·규모·당사자·시장 영향을 구체적으로 풀어 쓰세요.
-4. **날짜**: 절대 과거 날짜를 쓰지 마세요. 참조가 필요하면 "{today}" 또는 "오늘".
-5. **언어**: 원문이 영어여도 **반드시 자연스러운 한국어로 번역/의역**.
-6. **완결된 문장**: 중간에 끊기면 실패. 모든 문장은 마침표로 끝나야 함.
-7. **형식 엄수**: 아래 마크다운 구조 그대로, 빈 줄 포함.
+## 절대 준수 사항 (v2.7.0)
+1. **출력 구조**: 제목 1줄 + 4개 이모지 라인 + 원문 링크 1줄. **오직 이 형식만** 허용.
+2. **숫자 밀도**: 4개 이모지 라인에 **숫자(금액·%·건수·연도·배수 등)가 총 4개 이상** 포함되어야 함.
+3. **귀납법**: 💰(팩트)→📊(추가 팩트)→🔍(배경/맥락)→📈(결론·시사점) 순서로 **구체 사실에서 결론**으로 전개.
+4. **각 줄 길이**: 이모지 1줄당 **한국어 40~70자** (너무 길면 실패).
+5. **📈 라인**: 반드시 **"시사점"** 단어와 함께 **목표가·상승여력·수혜주·리스크** 중 하나 이상 포함.
+6. **언어**: 원문이 영어여도 자연스러운 한국어로 번역. 모든 문장은 마침표/느낌표로 종결.
+7. **추정 금지**: 원문에 없는 수치는 쓰지 말 것. 원문에 숫자가 부족하면 관련 업계 수치(시장규모·경쟁사 수치)를 ±1개 이내로만 보조 인용.
 
-## 출력 형식 (이 구조만 허용)
-### {rank}. {{한국어로 재작성한 핵심 제목 (25자 내외)}}
+## 출력 형식 (이 구조만 허용, 빈 줄 포함)
+### {rank}. {{한국어 핵심 제목 (25자 내외, 핵심 숫자 1개 포함 권장)}}
 
-- **카테고리**: {category}
-- **출처**: {orig.get("source", "")}
-- **요약**: {{핵심 사실을 **3문장 이상**의 서술형으로 설명. 배경·규모·당사자·시장 영향을 빠짐없이.}}
-- **투자 시사점**: {{이 뉴스가 어떤 종목/섹터에 어떤 영향(수혜/피해)을 미치는지 **2문장 이상**의 서술형.}}
+- **카테고리**: {category} · **출처**: {orig.get("source", "")}
+💰 {{핵심 팩트 1 — 금액/규모/비율 중심 (예: 매출 20.4조 +39% YoY · HBM 12.4조)}}
+📊 {{핵심 팩트 2 — 시점/경쟁/공급망 수치 (예: 엔비디아 GB200 2026년 동결 · HBM3E 12단 Q1'26 양산)}}
+🔍 {{배경·맥락 — 왜 중요한가 (경쟁사 상황·정책·시장점유율 수치 포함)}}
+📈 **시사점**: {{결론 — 수혜주/목표가/상승여력/리스크 중 1개 이상, 숫자 포함}}
+
 - **원문 링크**: [{orig.get("source", "원문")}]({orig.get("link", "")})
 
 ---
@@ -638,20 +659,44 @@ def _build_item_prompt(item: Dict[str, Any]) -> str:
 
 
 def _is_item_output_valid(text: str) -> Tuple[bool, str]:
-    """개별 뉴스 요약 응답 품질 검증."""
+    """v2.7.0: 4줄 귀납법 포맷 검증.
+    검증 기준:
+      - 최소 글자수 (MIN_ITEM_CHARS)
+      - 4개 이모지 라인(💰 📊 🔍 📈) 모두 존재
+      - 📈 라인에 '시사점' 키워드 존재 (귀납법 결론 강제)
+      - 출처/카테고리 라인 존재
+      - 숫자 최소 3개 이상 포함 (수치 중심 포맷 보장)
+    """
     if not text:
         return False, "empty"
     if len(text) < MIN_ITEM_CHARS:
         return False, f"too_short({len(text)}<{MIN_ITEM_CHARS})"
-    # 필수 섹션 존재 확인
-    required = ["**출처**", "**요약**", "**투자 시사점**", "**원문 링크**"]
-    missing = [r for r in required if r not in text]
+
+    # 필수 이모지 라인 4종
+    required_emojis = ["💰", "📊", "🔍", "📈"]
+    missing = [e for e in required_emojis if e not in text]
     if missing:
-        return False, f"missing_sections({missing})"
+        return False, f"missing_emoji_lines({missing})"
+
+    # 📈 라인에 '시사점' 키워드 존재 확인
+    if "시사점" not in text:
+        return False, "missing_implication_keyword"
+
+    # 출처 / 카테고리 메타 라인 존재
+    if "**카테고리**" not in text or "**출처**" not in text:
+        return False, "missing_meta_line"
+
+    # 수치 포함도 검증 — 숫자 최소 3개 이상
+    digit_count = sum(1 for c in text if c.isdigit())
+    if digit_count < 3:
+        return False, f"too_few_numbers({digit_count}<3)"
+
     # 문장 끊김 휴리스틱
     tail = text.rstrip()
-    if tail and tail[-1] not in ".。!?)」』》\"'”’)]":
+    _sentence_end = ".。!?)」』》\"'”’)]"
+    if tail and tail[-1] not in _sentence_end:
         return False, "truncated_mid_sentence"
+
     return True, "ok"
 
 
@@ -722,22 +767,26 @@ def summarize_one_item(client, item: Dict[str, Any]) -> str:
 
 
 def _fallback_item_markdown(item: Dict[str, Any]) -> str:
-    """AI 전면 실패 시 원본 데이터만으로 마크다운 생성."""
+    """v2.7.0: AI 전면 실패 시 원본 데이터로 4줄 귀납법 포맷 생성.
+    AI 수치 분석이 없으므로 각 라인에 장애 안내 또는 원본 발췌를 넣음.
+    """
     orig = item["original"]
     rank = item["rank"]
     category = item.get("category", "기타")
     title = orig.get("title", "(제목 없음)")[:120]
-    summary = orig.get("summary", "(요약 없음)")[:400]
+    summary_raw = (orig.get("summary") or "(본문 없음)").replace("\n", " ").strip()
+    summary_short = summary_raw[:180]
     source = orig.get("source", "")
     link = orig.get("link", "")
 
     return f"""### {rank}. {title}
 
-- **카테고리**: {category}
-- **출처**: {source}
-- **요약**: {summary}
-- **투자 시사점**: (AI 요약 엔진 장애로 자동 분석을 생성하지 못했습니다. 원문 기사를 확인해 주세요.)
-- **원문 링크**: [{source}]({link})
+- 💰 (AI 수치 분석 불가 — 원문 링크에서 실제 수치 확인)
+- 📊 {summary_short}
+- 🔍 (AI 요약 엔진 장애로 시장 구조 분석을 생성하지 못했습니다)
+- 📈 **시사점**: (자동 분석 실패. 원문 기사 전문을 확인해 주세요.)
+
+- **카테고리**: {category} · **출처**: [{source}]({link})
 """
 
 
