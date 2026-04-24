@@ -17,17 +17,15 @@ on:
         description: "DRY_RUN(true 이면 실제 발송 없이 HTML 프리뷰만 생성)"
         required: false
         default: "false"
-  workflow_run:
-    workflows: ["Morning Stock AI — 2/3 Summarize"]
-    types: [completed]
+  # v2.7.0 (2026-04-24): workflow_run 트리거 제거.
+  # 사유: schedule + workflow_run 이중 트리거로 하루 2~3회 중복 실행되어
+  #       수신자에게 같은 브리핑이 3통씩 발송되는 버그 발생.
+  # 대신: schedule(06:25 KST)만 사용하여 하루 정확히 1통 보장.
 
 jobs:
   send:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: >
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     steps:
