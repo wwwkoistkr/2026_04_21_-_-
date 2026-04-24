@@ -1,5 +1,17 @@
 """
-[v2.9.0] 10줄 귀납법 + 반도체/원자력 필터 + 15건 (미국 7 + 한국 8) + 920px 너비 (2026-04-24).
+[v2.9.1] 미국 뉴스 누락 방지 + 이메일 폭 1024px + 노란 박스 연동 (2026-04-24 패치).
+
+## v2.9.1 핵심 수정 (2026-04-24, 사용자 피드백 재반영)
+----------------------------------------------------
+사용자 피드백: "v2.9.0 배포 후 메일에 미국 뉴스 0건" "이메일 폭 더 넓게"
+v2.9.0 → v2.9.1 핵심 변경 3가지:
+  1) 🔴 _region_aware_fallback() 신규 — AI 랭킹 실패 시 미국 우선 폴백 (v2.9.0은 단순 slicing이어서 한국만 통과 가능성)
+  2) 🔴 assemble_final_briefing() 미국 0건 시 경고 메시지 + logger.error 출력
+  3) 🎨 email_sender.py: 이메일 폭 920→1024px, 노란 박스 폰트 27→24px(최적 밸런스), box-shadow 강화
+
+## v2.9.0 핵심 수정 (2026-04-24, 사용자 피드백 전면 반영)
+----------------------------------------------------
+v2.8.0(7줄/10건) → v2.9.0(10줄/15건) 확장. 사용자 요청 6가지 반영:
 
 ## v2.9.0 핵심 수정 (2026-04-24, 사용자 피드백 전면 반영)
 ----------------------------------------------------
@@ -456,26 +468,13 @@ def rank_top_news(
                 logger.warning("Step 1) OpenAI 랭킹도 실패: %s", exc2)
                 text = ""
         if not text:
-            logger.warning("Step 1) 랭킹 API 전면 실패 → 상위 %d건으로 폴백",
-                           TARGET_NEWS_COUNT)
-            return [
-                {
-                    "idx": i, "rank": i + 1, "category": "기타",
-                    "reason": "API 실패 자동 포함", "original": news_list[i],
-                }
-                for i in range(min(TARGET_NEWS_COUNT, len(news_list)))
-            ]
+            logger.warning("Step 1) 랭킹 API 전면 실패 → 미국 우선 폴백 (v2.9.1)")
+            return _region_aware_fallback(news_list)
 
     parsed = _parse_ranking_json(text)
     if not parsed:
-        logger.warning("랭킹 JSON 파싱 실패 → 상위 10건으로 폴백")
-        return [
-            {
-                "idx": i, "rank": i + 1, "category": "기타",
-                "reason": "자동 포함", "original": news_list[i],
-            }
-            for i in range(min(TARGET_NEWS_COUNT, len(news_list)))
-        ]
+        logger.warning("랭킹 JSON 파싱 실패 → 미국 우선 폴백 (v2.9.1)")
+        return _region_aware_fallback(news_list)
 
     # rank 순으로 정렬 + idx 유효성 검증
     result: List[Dict[str, Any]] = []
@@ -546,6 +545,70 @@ def _is_us_source(source: str) -> bool:
         if kw.lower() in s.lower():
             return True
     return False
+
+
+def _region_aware_fallback(news_list: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """
+    v2.9.1: AI 랭킹 전면 실패 시 사용하는 미국 우선 폴백 로직.
+
+    기존(v2.9.0): news_list[:15] 를 단순히 잘랐기 때문에 수집 결과 순서가
+                 한국 뉴스 먼저이면 미국 뉴스 0건으로 발송되는 버그 발생.
+
+    개선(v2.9.1): 수집 결과에서 미국 매체 7건 + 한국 매체 8건을 각각 앞에서부터
+                 골라 정확한 15건(미국 먼저) 구성을 강제한다.
+    """
+    us_candidates = [(i, n) for i, n in enumerate(news_list)
+                     if _is_us_source(n.get("source", ""))]
+    kr_candidates = [(i, n) for i, n in enumerate(news_list)
+                     if not _is_us_source(n.get("source", ""))]
+
+    logger.info(
+        "🔄 폴백 랭킹: 수집된 미국 %d건, 한국 %d건 → 목표 미국 %d, 한국 %d",
+        len(us_candidates), len(kr_candidates), US_QUOTA, KR_QUOTA,
+    )
+
+    # 미국 우선 선정 → 한국으로 보충
+    picked_us = us_candidates[:US_QUOTA]
+    picked_kr = kr_candidates[:KR_QUOTA]
+
+    # 미국이 부족하면 한국으로, 한국이 부족하면 미국으로 보충
+    total = len(picked_us) + len(picked_kr)
+    if total < TARGET_NEWS_COUNT:
+        extra_us = us_candidates[len(picked_us):]
+        extra_kr = kr_candidates[len(picked_kr):]
+        for src in (extra_kr, extra_us):
+            for cand in src:
+                if total >= TARGET_NEWS_COUNT:
+                    break
+                # 이미 포함된 인덱스 회피
+                if cand[0] not in {x[0] for x in (picked_us + picked_kr)}:
+                    if _is_us_source(cand[1].get("source", "")):
+                        picked_us.append(cand)
+                    else:
+                        picked_kr.append(cand)
+                    total += 1
+
+    # 순서: 미국 먼저 → 한국 이후
+    result: List[Dict[str, Any]] = []
+    rank = 1
+    for (idx, n) in picked_us:
+        result.append({
+            "idx": idx, "rank": rank, "category": "미국증시",
+            "reason": "🇺🇸 폴백 선정 (v2.9.1)", "original": n,
+        })
+        rank += 1
+    for (idx, n) in picked_kr:
+        result.append({
+            "idx": idx, "rank": rank, "category": "한국증시",
+            "reason": "🇰🇷 폴백 선정 (v2.9.1)", "original": n,
+        })
+        rank += 1
+
+    logger.warning(
+        "🔄 폴백 완료: 최종 %d건 (🇺🇸 %d + 🇰🇷 %d)",
+        len(result), len(picked_us), len(picked_kr),
+    )
+    return result
 
 
 def _enforce_region_quota(
@@ -1059,7 +1122,7 @@ def assemble_final_briefing(
 """
 
     # ──────────────────────────────────────────────────────────
-    # 🇺🇸 미국 시장 섹션 (v2.6.2 신규)
+    # 🇺🇸 미국 시장 섹션 (v2.6.2 / v2.9.1 진단 강화)
     # ──────────────────────────────────────────────────────────
     us_section = ""
     if us_indices:
@@ -1070,6 +1133,19 @@ def assemble_final_briefing(
 """
         us_body = "\n\n".join(item_markdowns[i] for i in us_indices)
         us_section = us_header + us_body + "\n\n---\n\n"
+        logger.info("✅ 미국 시장 섹션 생성: %d건", us_count)
+    else:
+        # v2.9.1: 미국 뉴스가 0건이면 사용자에게 명시적으로 알려준다.
+        logger.error(
+            "⚠️ 미국 시장 섹션 비어있음! ranked_items=%d, 모든 출처=%s",
+            len(ranked_items),
+            [it["original"].get("source", "") for it in ranked_items],
+        )
+        us_section = (
+            "## 🇺🇸 미국 시장 (0건)\n\n"
+            "> ⚠️ 오늘은 미국 뉴스 수집/랭킹에 문제가 발생해 이 섹션이 비어 있습니다.\n"
+            "> 관리자에게 GitHub Actions 로그 공유를 부탁드립니다.\n\n---\n\n"
+        )
 
     # ──────────────────────────────────────────────────────────
     # 🇰🇷 한국 시장 섹션 (v2.6.2 신규)
