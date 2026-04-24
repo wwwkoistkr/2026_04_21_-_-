@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <title>Test v2.9.0</title>
+  <style>
+    /* v2.8.0: Retina 레벨 안티에일리어싱 ( "8K 느낌" 선명도 ) */
+    html, body {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+    }
+    img {
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+      -ms-interpolation-mode: bicubic;
+    }
+    /* v2.9.0: 모바일 반응형 ( 480px 이하 ) - 폰트 자동 축소 + 패딩 최적화 */
+    @media only screen and (max-width: 480px) {
+      table[width="920"] { width: 100% !important; max-width: 100% !important; }
+      .hdr-title   { font-size: 30px !important; }
+      .hdr-date    { font-size: 19px !important; }
+      .hdr-kicker  { font-size: 15px !important; }
+      .hdr-meta    { font-size: 15px !important; }
+      .brief-title { font-size: 24px !important; }
+      .section-title { font-size: 22px !important; }
+      .overview-title { font-size: 23px !important; }
+      .overview-line  { font-size: 19px !important; line-height: 1.75 !important; }
+      .card-title   { font-size: 21px !important; line-height: 1.4 !important; }
+      .card-summary { font-size: 18px !important; line-height: 1.7 !important; padding: 12px 14px !important; border-left-width: 4px !important; }
+      .card-insight { font-size: 19px !important; line-height: 1.7 !important; padding: 14px 16px !important; border-left-width: 5px !important; margin: 12px 0 !important; }
+      .card-link    { font-size: 17px !important; }
+      .src          { font-size: 15px !important; }
+      .intro-p      { font-size: 18px !important; line-height: 1.7 !important; }
+      .footer       { font-size: 15px !important; padding: 18px 16px 20px !important; }
+    }
+    /* v2.9.0: 중형 모바일/태블릿 ( 481~768px ) */
+    @media only screen and (min-width: 481px) and (max-width: 768px) {
+      table[width="920"] { width: 100% !important; max-width: 100% !important; }
+      .hdr-title   { font-size: 34px !important; }
+      .brief-title { font-size: 28px !important; }
+      .section-title { font-size: 24px !important; }
+      .card-title   { font-size: 24px !important; }
+      .card-summary, .card-insight { font-size: 21px !important; padding: 15px 18px !important; }
+      .overview-line { font-size: 22px !important; }
+      .intro-p      { font-size: 20px !important; }
+      .footer       { font-size: 17px !important; }
+    }
+    /* v2.9.0: 대형 태블릿 ( 769~920px ) — 카드 폭 100% 활용 */
+    @media only screen and (min-width: 769px) and (max-width: 920px) {
+      table[width="920"] { width: 100% !important; max-width: 100% !important; }
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:'Apple SD Gothic Neo','Malgun Gothic',Helvetica,Arial,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="920" cellpadding="0" cellspacing="0" style="max-width:920px;width:100%;">
+
+          <!-- 헤더 카드 -->
+          <tr><td>
+            <div style="background:linear-gradient(135deg,#1d4ed8 0%,#0ea5e9 50%,#06b6d4 100%);
+                        border-radius:14px 14px 0 0;padding:28px 32px;color:#fff;
+                        box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+              <div class="hdr-kicker" style="font-size:19px;opacity:.85;letter-spacing:2px;font-weight:600;">
+                MORNING STOCK AI · DAILY BRIEFING
+              </div>
+              <div class="hdr-title" style="font-size:40px;font-weight:700;margin-top:10px;line-height:1.25;">
+                🌅 Morning Stock AI Briefing Center
+              </div>
+              <div class="hdr-date" style="font-size:24px;margin-top:8px;opacity:.95;">
+                2026-04-25 (금) · 주식·반도체 일일 브리핑
+              </div>
+              <div class="hdr-meta" style="font-size:19px;margin-top:16px;opacity:.85;border-top:1px solid rgba(255,255,255,.2);
+                          padding-top:12px;line-height:1.55;">
+                📊 반도체: 10건 · 원자력: 5건
+              </div>
+            </div>
+          </td></tr>
+
+          <!-- 본문 카드 -->
+          <tr><td style="background:#ffffff;padding:20px 28px;box-shadow:0 4px 12px rgba(0,0,0,0.04);">
+            <h2 class="brief-title" style="margin:0 0 12px;font-size:32px;color:#0f172a;font-weight:700;border-bottom:2px solid #e5e7eb;padding-bottom:10px;">📈 MORNING STOCK AI · 2026-04-25</h2>
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">1</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#64748b;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">원자력</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 Seeking Alpha</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 1 Title about 원자력
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/1" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">Seeking Alpha ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">2</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#dc2626;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">반도체</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 Seeking Alpha</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 2 Title about 반도체
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/2" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">Seeking Alpha ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">3</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#64748b;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">원자력</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 Seeking Alpha</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 3 Title about 원자력
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/3" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">Seeking Alpha ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">4</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#dc2626;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">반도체</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 Seeking Alpha</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 4 Title about 반도체
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/4" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">Seeking Alpha ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">5</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#64748b;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">원자력</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 Seeking Alpha</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 5 Title about 원자력
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/5" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">Seeking Alpha ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">6</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#dc2626;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">반도체</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 Seeking Alpha</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 6 Title about 반도체
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/6" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">Seeking Alpha ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">7</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#64748b;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">원자력</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 Seeking Alpha</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 7 Title about 원자력
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/7" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">Seeking Alpha ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">8</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#dc2626;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">반도체</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 한국경제</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 8 Title about 반도체
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/8" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">한국경제 ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">9</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#64748b;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">원자력</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 한국경제</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 9 Title about 원자력
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/9" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">한국경제 ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">10</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#dc2626;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">반도체</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 한국경제</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 10 Title about 반도체
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/10" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">한국경제 ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">11</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#64748b;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">원자력</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 한국경제</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 11 Title about 원자력
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/11" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">한국경제 ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">12</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#dc2626;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">반도체</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 한국경제</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 12 Title about 반도체
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/12" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">한국경제 ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">13</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#64748b;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">원자력</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 한국경제</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 13 Title about 원자력
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/13" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">한국경제 ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">14</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#dc2626;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">반도체</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 한국경제</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 14 Title about 반도체
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/14" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">한국경제 ↗</a>
+  </div>
+</div>
+
+
+<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
+            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:10px;">
+    <span style="display:inline-block;width:28px;height:28px;line-height:28px;border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);color:#fff;text-align:center;font-weight:700;font-size:22px;margin-right:10px;vertical-align:middle;">15</span><span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#64748b;color:#fff;font-size:19px;font-weight:600;letter-spacing:.3px;">원자력</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 한국경제</span>
+  </div>
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+    Sample News 15 Title about 원자력
+  </h3>
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
+    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
+    💰 매출 52조원 돌파, 영업익 37조원 기록. 📊 HBM 공급 72% 증가, CHIPS Act 효과. 📉 중국 CXMT 견제 요인. 📈 AI 수요 지속, D램 가격 상승. 🔍 수요 공급 구조 변화. 🎯 수혜주 SK하이닉스(000660) 목표가 30만원. 📬 시사점: 매수, 상승여력 25%.
+  </div>
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
+    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
+    반도체 업황 개선으로 SK하이닉스·삼성전자 수혜. 목표가 상향.
+  </div>
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
+    🔗 <a href="https://example.com/15" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:none;font-weight:600;">한국경제 ↗</a>
+  </div>
+</div>
+
+
+<div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:10px;
+            padding:18px 22px;margin:24px 0 10px;">
+  <h2 class="overview-title" style="margin:0 0 12px;font-size:30px;color:#78350f;font-weight:700;">
+    🔎 오늘의 한 줄 총평
+  </h2>
+
+<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">오늘은 반도체 업황 개선과 원자력 정책 변화가 핵심입니다.</p>
+<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">HBM 수요 급증으로 SK하이닉스 목표가 상향, 30만원 제시.</p>
+<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">삼성전자 HBM3E 지연 이슈가 경쟁력 약화 요인.</p>
+<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">CHIPS Act 보조금 지급으로 미국 파운드리 수혜.</p>
+<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">중국 CXMT의 HBM 진출 시도는 견제 요인.</p>
+<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">원자력 르네상스로 SMR 관련주 상승.</p>
+<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">두산에너빌리티·한전기술 수혜 주목.</p>
+<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">금리 동결 전망으로 성장주 유리한 환경.</p>
+<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">2분기 어닝 시즌 앞두고 변동성 확대 가능.</p>
+<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">리스크 관리와 분할 매수 전략 권장.</p>
+</div>
+          </td></tr>
+
+          <!-- 푸터 -->
+          <tr><td class="footer" style="background:#f8fafc;padding:22px 28px 26px;border-radius:0 0 14px 14px;
+                         border-top:1px solid #e2e8f0;font-size:20px;color:#64748b;line-height:1.65;
+                         box-shadow:0 4px 12px rgba(0,0,0,0.04);">
+            <div style="margin-bottom:8px;">
+              📌 <strong>이 메일은 매일 오전 6시 30분(KST) GitHub Actions 에 의해 자동 발송됩니다.</strong>
+            </div>
+            <div style="margin-bottom:6px;">
+              🗞️ <strong>원천 데이터</strong>: 🇺🇸 Seeking Alpha · Reuters · Bloomberg · ETF.com · Morningstar 🇰🇷 한국경제 · 매일경제
+            </div>
+            <div style="margin-bottom:6px;">
+              🤖 <strong>요약 엔진</strong>: Google Gemini 2.5 Flash (2단계 파이프라인 v2.5.1)
+            </div>
+            <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #cbd5e1;color:#94a3b8;">
+              ⚠️ 본 브리핑은 정보 제공을 위한 참고용 자료이며, 투자 권유가 아닙니다.<br/>
+              최종 투자 판단은 독자 본인의 책임 하에 이루어져야 합니다.
+            </div>
+          </td></tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

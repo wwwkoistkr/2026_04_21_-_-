@@ -83,6 +83,53 @@ KOREAN_RSS_FEEDS: List[Dict[str, str]] = [
         ),
         "fallback": None,
     },
+    # ── v2.9.0: 한국 반도체 테마 강화 (Google News 우회) ──
+    {
+        "source": "한국경제(반도체)",
+        "url": (
+            "https://news.google.com/rss/search?"
+            "q=site:hankyung.com+%EB%B0%98%EB%8F%84%EC%B2%B4+OR+HBM+OR+SK%ED%95%98%EC%9D%B4%EB%8B%89%EC%8A%A4"
+            "&hl=ko&gl=KR&ceid=KR:ko"
+        ),
+        "fallback": None,
+    },
+    {
+        "source": "조선비즈(반도체)",
+        "url": (
+            "https://news.google.com/rss/search?"
+            "q=site:biz.chosun.com+%EB%B0%98%EB%8F%84%EC%B2%B4+OR+HBM"
+            "&hl=ko&gl=KR&ceid=KR:ko"
+        ),
+        "fallback": None,
+    },
+    # ── v2.9.0: 한국 원자력 테마 신규 (Google News 우회) ──
+    {
+        "source": "한국경제(원자력)",
+        "url": (
+            "https://news.google.com/rss/search?"
+            "q=site:hankyung.com+%EC%9B%90%EC%9E%90%EB%A0%A5+OR+%EC%86%8C%ED%98%95%EC%9B%90%EC%9E%90%EB%A1%9C+OR+SMR+OR+%EB%91%90%EC%82%B0%EC%97%90%EB%84%88%EB%B9%8C%EB%A6%AC%ED%8B%B0"
+            "&hl=ko&gl=KR&ceid=KR:ko"
+        ),
+        "fallback": None,
+    },
+    {
+        "source": "매일경제(원자력)",
+        "url": (
+            "https://news.google.com/rss/search?"
+            "q=site:mk.co.kr+%EC%9B%90%EC%9E%90%EB%A0%A5+OR+SMR+OR+%EC%9B%90%EC%A0%84"
+            "&hl=ko&gl=KR&ceid=KR:ko"
+        ),
+        "fallback": None,
+    },
+    {
+        "source": "조선비즈(원자력)",
+        "url": (
+            "https://news.google.com/rss/search?"
+            "q=site:biz.chosun.com+%EC%9B%90%EC%9E%90%EB%A0%A5+OR+SMR+OR+%EC%9B%90%EC%A0%84+OR+%EB%91%90%EC%82%B0%EC%97%90%EB%84%88%EB%B9%8C%EB%A6%AC%ED%8B%B0"
+            "&hl=ko&gl=KR&ceid=KR:ko"
+        ),
+        "fallback": None,
+    },
 ]
 
 # 브라우저 위장 헤더 (지침서 3.1 전략 1) – 일부 RSS 서버가 봇을 차단할 때 사용

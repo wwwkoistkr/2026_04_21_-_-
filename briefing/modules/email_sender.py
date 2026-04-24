@@ -10,6 +10,19 @@
   - BRIEFING_READ_TOKEN: (선택) 위 Hono API 호출 시 Bearer 토큰.
 
 Markdown 으로 작성된 AI 브리핑을 예쁜 HTML 로 변환해 첨부 없이 본문 송신합니다.
+
+=== 버전 기록 ===
+v2.9.0 (2026-04-24): 반도체/원자력 전용 필터 + 노란 박스(투자 시사점) 확대
+  - 레이아웃 폭: 680px → 920px (+35%, 데스크톱 가독성 향상)
+  - 노란 박스 (💡 투자 시사점): 폰트 23→27px, 패딩 18→26px, 테두리 6→8px, box-shadow 추가
+  - 🔎 총평 10줄 지원 (뉴스별로 .overview-line 폰트 26px)
+  - 모바일 @media 3단계 (≤480px, 481~768px, 769~920px) 풀 반응형
+  - Retina 안티에일리어싱 유지 (html/body/img 단계)
+  - 뉴스 15건 지원 (US 7 + KR 8), 카테고리 반도체/원자력만
+
+v2.8.0 (2026-04-24): 7줄 귀납법 + 2배 폰트 + 모바일 반응형
+v2.7.0 (2026-04-24): 4줄 압축 포맷
+v2.5.0: 카드형 Markdown→HTML 변환기 도입
 """
 from __future__ import annotations
 
@@ -185,13 +198,14 @@ def _render_news_card(item: dict) -> str:
   <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
     {title}
   </h3>
-  <div class="card-summary" style="background:#f8fafc;border-left:4px solid #0ea5e9;padding:14px 18px;
-              margin:12px 0;border-radius:6px;font-size:24px;line-height:1.75;color:#334155;">
+  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
+              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
     <strong style="color:#0c4a6e;">📊 요약</strong><br/>
     {summary}
   </div>
-  <div class="card-insight" style="background:#fef3c7;border-left:4px solid #f59e0b;padding:14px 18px;
-              margin:12px 0;border-radius:6px;font-size:24px;line-height:1.75;color:#78350f;">
+  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
+              margin:18px 0;border-radius:10px;font-size:27px;line-height:1.85;color:#78350f;
+              box-shadow:0 2px 6px rgba(245,158,11,0.15);">
     <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
     {insight}
   </div>
@@ -365,8 +379,9 @@ HTML_TEMPLATE = """\
       image-rendering: crisp-edges;
       -ms-interpolation-mode: bicubic;
     }}
-    /* v2.8.0: 모바일 반응형 ( 480px 이하 ) - 폰트 자동 축소 + 패딩 최적화 */
+    /* v2.9.0: 모바일 반응형 ( 480px 이하 ) - 폰트 자동 축소 + 패딩 최적화 */
     @media only screen and (max-width: 480px) {{
+      table[width="920"] {{ width: 100% !important; max-width: 100% !important; }}
       .hdr-title   {{ font-size: 30px !important; }}
       .hdr-date    {{ font-size: 19px !important; }}
       .hdr-kicker  {{ font-size: 15px !important; }}
@@ -376,23 +391,28 @@ HTML_TEMPLATE = """\
       .overview-title {{ font-size: 23px !important; }}
       .overview-line  {{ font-size: 19px !important; line-height: 1.75 !important; }}
       .card-title   {{ font-size: 21px !important; line-height: 1.4 !important; }}
-      .card-summary {{ font-size: 18px !important; line-height: 1.7 !important; padding: 11px 13px !important; }}
-      .card-insight {{ font-size: 18px !important; line-height: 1.7 !important; padding: 11px 13px !important; }}
+      .card-summary {{ font-size: 18px !important; line-height: 1.7 !important; padding: 12px 14px !important; border-left-width: 4px !important; }}
+      .card-insight {{ font-size: 19px !important; line-height: 1.7 !important; padding: 14px 16px !important; border-left-width: 5px !important; margin: 12px 0 !important; }}
       .card-link    {{ font-size: 17px !important; }}
       .src          {{ font-size: 15px !important; }}
       .intro-p      {{ font-size: 18px !important; line-height: 1.7 !important; }}
       .footer       {{ font-size: 15px !important; padding: 18px 16px 20px !important; }}
     }}
-    /* v2.8.0: 중형 모바일/태블릿 ( 481~640px ) */
-    @media only screen and (min-width: 481px) and (max-width: 640px) {{
+    /* v2.9.0: 중형 모바일/태블릿 ( 481~768px ) */
+    @media only screen and (min-width: 481px) and (max-width: 768px) {{
+      table[width="920"] {{ width: 100% !important; max-width: 100% !important; }}
       .hdr-title   {{ font-size: 34px !important; }}
       .brief-title {{ font-size: 28px !important; }}
       .section-title {{ font-size: 24px !important; }}
       .card-title   {{ font-size: 24px !important; }}
-      .card-summary, .card-insight {{ font-size: 20px !important; }}
+      .card-summary, .card-insight {{ font-size: 21px !important; padding: 15px 18px !important; }}
       .overview-line {{ font-size: 22px !important; }}
       .intro-p      {{ font-size: 20px !important; }}
       .footer       {{ font-size: 17px !important; }}
+    }}
+    /* v2.9.0: 대형 태블릿 ( 769~920px ) — 카드 폭 100% 활용 */
+    @media only screen and (min-width: 769px) and (max-width: 920px) {{
+      table[width="920"] {{ width: 100% !important; max-width: 100% !important; }}
     }}
   </style>
 </head>
@@ -400,7 +420,7 @@ HTML_TEMPLATE = """\
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 0;">
     <tr>
       <td align="center">
-        <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="max-width:680px;width:100%;">
+        <table role="presentation" width="920" cellpadding="0" cellspacing="0" style="max-width:920px;width:100%;">
 
           <!-- 헤더 카드 -->
           <tr><td>

@@ -17,15 +17,31 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Google News RSS 우회 대상 – site 와 검색어 조합
+# v2.9.0: 반도체 + 원자력 2개 테마 확장 (총 10개 피드)
 # ---------------------------------------------------------------------------
 US_FEEDS: List[Dict[str, str]] = [
-    {"source": "Seeking Alpha", "site": "seekingalpha.com", "query": "semiconductor"},
-    {"source": "Seeking Alpha (ETF)", "site": "seekingalpha.com", "query": "ETF"},
-    {"source": "ETF.com", "site": "etf.com", "query": "semiconductor"},
-    {"source": "Morningstar", "site": "morningstar.com", "query": "semiconductor ETF"},
-    # 보너스: Reuters / Bloomberg 에서도 반도체 뉴스 추출
-    {"source": "Reuters", "site": "reuters.com", "query": "semiconductor"},
-    {"source": "Bloomberg", "site": "bloomberg.com", "query": "semiconductor"},
+    # ─── 🔬 반도체 테마 (6개 피드) ───────────────────────────
+    {"source": "Seeking Alpha", "site": "seekingalpha.com",
+     "query": "semiconductor OR HBM OR NVIDIA OR TSMC"},
+    {"source": "Seeking Alpha (ETF)", "site": "seekingalpha.com",
+     "query": "SOXX OR SMH semiconductor ETF"},
+    {"source": "Reuters", "site": "reuters.com",
+     "query": "semiconductor OR chip OR NVIDIA OR TSMC"},
+    {"source": "Bloomberg", "site": "bloomberg.com",
+     "query": "semiconductor OR chip OR memory"},
+    {"source": "ETF.com", "site": "etf.com",
+     "query": "semiconductor SOXX SMH"},
+    {"source": "Morningstar", "site": "morningstar.com",
+     "query": "semiconductor AI chip"},
+    # ─── ⚛️ 원자력 테마 (4개 피드, v2.9.0 신규) ──────────────
+    {"source": "Reuters (Nuclear)", "site": "reuters.com",
+     "query": "nuclear power OR SMR OR uranium"},
+    {"source": "Bloomberg (Nuclear)", "site": "bloomberg.com",
+     "query": "nuclear OR SMR OR uranium"},
+    {"source": "Seeking Alpha (Nuclear)", "site": "seekingalpha.com",
+     "query": "nuclear uranium SMR"},
+    {"source": "Morningstar (Nuclear)", "site": "morningstar.com",
+     "query": "nuclear uranium ETF"},
 ]
 
 
