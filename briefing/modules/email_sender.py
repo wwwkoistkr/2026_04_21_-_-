@@ -137,7 +137,7 @@ def _category_badge_html(category: str) -> str:
     color = _CATEGORY_COLORS.get(category, _CATEGORY_COLORS["기타"])
     return (
         f'<span style="display:inline-block;padding:3px 10px;border-radius:12px;'
-        f'background:{color};color:#fff;font-size:11px;font-weight:600;'
+        f'background:{color};color:#fff;font-size:19px;font-weight:600;'
         f'letter-spacing:.3px;">{category}</span>'
     )
 
@@ -171,7 +171,7 @@ def _render_news_card(item: dict) -> str:
     rank_badge = (
         f'<span style="display:inline-block;width:28px;height:28px;line-height:28px;'
         f'border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);'
-        f'color:#fff;text-align:center;font-weight:700;font-size:13px;'
+        f'color:#fff;text-align:center;font-weight:700;font-size:22px;'
         f'margin-right:10px;vertical-align:middle;">{rank}</span>'
     )
 
@@ -180,22 +180,22 @@ def _render_news_card(item: dict) -> str:
             padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
   <div style="display:flex;align-items:center;margin-bottom:10px;">
     {rank_badge}{category_badge}
-    <span style="margin-left:auto;font-size:12px;color:#64748b;">📰 {source}</span>
+    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 {source}</span>
   </div>
-  <h3 style="margin:6px 0 12px;font-size:17px;font-weight:700;color:#0f172a;line-height:1.4;">
+  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
     {title}
   </h3>
-  <div style="background:#f8fafc;border-left:3px solid #0ea5e9;padding:10px 14px;
-              margin:10px 0;border-radius:4px;font-size:14px;line-height:1.65;color:#334155;">
+  <div class="card-summary" style="background:#f8fafc;border-left:4px solid #0ea5e9;padding:14px 18px;
+              margin:12px 0;border-radius:6px;font-size:24px;line-height:1.75;color:#334155;">
     <strong style="color:#0c4a6e;">📊 요약</strong><br/>
     {summary}
   </div>
-  <div style="background:#fef3c7;border-left:3px solid #f59e0b;padding:10px 14px;
-              margin:10px 0;border-radius:4px;font-size:14px;line-height:1.65;color:#78350f;">
+  <div class="card-insight" style="background:#fef3c7;border-left:4px solid #f59e0b;padding:14px 18px;
+              margin:12px 0;border-radius:6px;font-size:24px;line-height:1.75;color:#78350f;">
     <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
     {insight}
   </div>
-  <div style="margin-top:12px;font-size:13px;">
+  <div class="card-link" style="margin-top:14px;font-size:22px;">
     🔗 {link_html}
   </div>
 </div>
@@ -260,7 +260,7 @@ def _md_to_html(md: str) -> str:
                 html_lines.append(f"""
 <div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:10px;
             padding:18px 22px;margin:24px 0 10px;">
-  <h2 style="margin:0 0 10px;font-size:18px;color:#78350f;font-weight:700;">
+  <h2 class="overview-title" style="margin:0 0 12px;font-size:30px;color:#78350f;font-weight:700;">
     {_inline_md(content)}
   </h2>
 """)
@@ -268,13 +268,13 @@ def _md_to_html(md: str) -> str:
                 # 첫 H2 = 브리핑 타이틀
                 header_rendered = True
                 html_lines.append(
-                    f'<h2 style="margin:0 0 12px;font-size:19px;color:#0f172a;'
+                    f'<h2 class="brief-title" style="margin:0 0 12px;font-size:32px;color:#0f172a;'
                     f'font-weight:700;border-bottom:2px solid #e5e7eb;'
                     f'padding-bottom:10px;">{_inline_md(content)}</h2>'
                 )
             else:
                 html_lines.append(
-                    f'<h2 style="margin:20px 0 10px;font-size:17px;color:#0f172a;'
+                    f'<h2 class="section-title" style="margin:22px 0 12px;font-size:28px;color:#0f172a;'
                     f'font-weight:700;">{_inline_md(content)}</h2>'
                 )
             i += 1
@@ -318,7 +318,7 @@ def _md_to_html(md: str) -> str:
         # 총평 섹션 본문
         if in_overview:
             html_lines.append(
-                f'<p style="margin:4px 0;font-size:15px;line-height:1.8;color:#78350f;">'
+                f'<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">'
                 f'{_inline_md(line)}</p>'
             )
             i += 1
@@ -327,7 +327,7 @@ def _md_to_html(md: str) -> str:
         # 기타 일반 텍스트 (인트로 문단 등)
         flush_item()
         html_lines.append(
-            f'<p style="margin:10px 0;font-size:14px;line-height:1.7;color:#475569;">'
+            f'<p class="intro-p" style="margin:10px 0;font-size:24px;line-height:1.8;color:#475569;">'
             f'{_inline_md(line)}</p>'
         )
         i += 1
@@ -348,7 +348,53 @@ HTML_TEMPLATE = """\
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="x-apple-disable-message-reformatting" />
   <title>{subject}</title>
+  <style>
+    /* v2.8.0: Retina 레벨 안티에일리어싱 ( "8K 느낌" 선명도 ) */
+    html, body {{
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+    }}
+    img {{
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+      -ms-interpolation-mode: bicubic;
+    }}
+    /* v2.8.0: 모바일 반응형 ( 480px 이하 ) - 폰트 자동 축소 + 패딩 최적화 */
+    @media only screen and (max-width: 480px) {{
+      .hdr-title   {{ font-size: 30px !important; }}
+      .hdr-date    {{ font-size: 19px !important; }}
+      .hdr-kicker  {{ font-size: 15px !important; }}
+      .hdr-meta    {{ font-size: 15px !important; }}
+      .brief-title {{ font-size: 24px !important; }}
+      .section-title {{ font-size: 22px !important; }}
+      .overview-title {{ font-size: 23px !important; }}
+      .overview-line  {{ font-size: 19px !important; line-height: 1.75 !important; }}
+      .card-title   {{ font-size: 21px !important; line-height: 1.4 !important; }}
+      .card-summary {{ font-size: 18px !important; line-height: 1.7 !important; padding: 11px 13px !important; }}
+      .card-insight {{ font-size: 18px !important; line-height: 1.7 !important; padding: 11px 13px !important; }}
+      .card-link    {{ font-size: 17px !important; }}
+      .src          {{ font-size: 15px !important; }}
+      .intro-p      {{ font-size: 18px !important; line-height: 1.7 !important; }}
+      .footer       {{ font-size: 15px !important; padding: 18px 16px 20px !important; }}
+    }}
+    /* v2.8.0: 중형 모바일/태블릿 ( 481~640px ) */
+    @media only screen and (min-width: 481px) and (max-width: 640px) {{
+      .hdr-title   {{ font-size: 34px !important; }}
+      .brief-title {{ font-size: 28px !important; }}
+      .section-title {{ font-size: 24px !important; }}
+      .card-title   {{ font-size: 24px !important; }}
+      .card-summary, .card-insight {{ font-size: 20px !important; }}
+      .overview-line {{ font-size: 22px !important; }}
+      .intro-p      {{ font-size: 20px !important; }}
+      .footer       {{ font-size: 17px !important; }}
+    }}
+  </style>
 </head>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:'Apple SD Gothic Neo','Malgun Gothic',Helvetica,Arial,sans-serif;color:#0f172a;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 0;">
@@ -361,17 +407,17 @@ HTML_TEMPLATE = """\
             <div style="background:linear-gradient(135deg,#1d4ed8 0%,#0ea5e9 50%,#06b6d4 100%);
                         border-radius:14px 14px 0 0;padding:28px 32px;color:#fff;
                         box-shadow:0 4px 12px rgba(0,0,0,0.08);">
-              <div style="font-size:11px;opacity:.85;letter-spacing:2px;font-weight:600;">
+              <div class="hdr-kicker" style="font-size:19px;opacity:.85;letter-spacing:2px;font-weight:600;">
                 MORNING STOCK AI · DAILY BRIEFING
               </div>
-              <div style="font-size:24px;font-weight:700;margin-top:8px;">
+              <div class="hdr-title" style="font-size:40px;font-weight:700;margin-top:10px;line-height:1.25;">
                 🌅 Morning Stock AI Briefing Center
               </div>
-              <div style="font-size:14px;margin-top:6px;opacity:.95;">
+              <div class="hdr-date" style="font-size:24px;margin-top:8px;opacity:.95;">
                 {today} · 주식·반도체 일일 브리핑
               </div>
-              <div style="font-size:11px;margin-top:14px;opacity:.85;border-top:1px solid rgba(255,255,255,.2);
-                          padding-top:10px;">
+              <div class="hdr-meta" style="font-size:19px;margin-top:16px;opacity:.85;border-top:1px solid rgba(255,255,255,.2);
+                          padding-top:12px;line-height:1.55;">
                 📊 {meta_summary}
               </div>
             </div>
@@ -383,8 +429,8 @@ HTML_TEMPLATE = """\
           </td></tr>
 
           <!-- 푸터 -->
-          <tr><td style="background:#f8fafc;padding:20px 28px 24px;border-radius:0 0 14px 14px;
-                         border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;
+          <tr><td class="footer" style="background:#f8fafc;padding:22px 28px 26px;border-radius:0 0 14px 14px;
+                         border-top:1px solid #e2e8f0;font-size:20px;color:#64748b;line-height:1.65;
                          box-shadow:0 4px 12px rgba(0,0,0,0.04);">
             <div style="margin-bottom:8px;">
               📌 <strong>이 메일은 매일 오전 6시 30분(KST) GitHub Actions 에 의해 자동 발송됩니다.</strong>
