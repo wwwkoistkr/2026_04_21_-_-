@@ -512,11 +512,11 @@ def rank_top_news(
     result = result[:TARGET_NEWS_COUNT]
 
     # ─────────────────────────────────────────────────────────────
-    # v2.6.2: 🇺🇸 미국 4건 + 🇰🇷 한국 6건 엄격 쿼터 + 순서 재배치
+    # v2.9.0: 🇺🇸 미국 7건 + 🇰🇷 한국 8건 엄격 쿼터 + 순서 재배치 (v2.6.2 대비 확장)
     # ─────────────────────────────────────────────────────────────
     # 독자는 매일 동일 구성의 브리핑을 기대하므로 수량을 고정한다.
     # 또한 "미국 섹션 먼저 → 한국 섹션 나중" 구조이므로
-    # 미국 4건이 rank 1~4 로 오도록 재정렬한다.
+    # 미국 7건이 rank 1~7 로 오도록 재정렬한다.
     result = _enforce_region_quota(result, news_list, seen_idx,
                                     target_us=US_QUOTA, target_kr=KR_QUOTA)
 
@@ -527,7 +527,7 @@ def rank_top_news(
 
 
 # ═══════════════════════════════════════════════════════════════
-# v2.6.2: 미국/한국 매체 식별 + 엄격 쿼터(미국 4 + 한국 6) 강제 로직
+# v2.9.0: 미국/한국 매체 식별 + 엄격 쿼터(미국 7 + 한국 8) 강제 로직
 # ═══════════════════════════════════════════════════════════════
 US_SOURCE_KEYWORDS = (
     "Seeking Alpha", "Reuters", "Bloomberg",
@@ -646,7 +646,7 @@ def _enforce_region_quota(
         final_result.append(item)
 
     logger.info(
-        "✅ v2.6.2 쿼터 강제 적용 완료: 🇺🇸 %d건 (rank 1~%d) + 🇰🇷 %d건 (rank %d~%d) = 총 %d건",
+        "✅ v2.9.0 쿼터 강제 적용 완료: 🇺🇸 %d건 (rank 1~%d) + 🇰🇷 %d건 (rank %d~%d) = 총 %d건",
         len(ai_us), target_us,
         len(ai_kr), target_us + 1, target_us + target_kr,
         len(final_result),
