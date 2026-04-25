@@ -263,6 +263,12 @@ def _build_ranking_prompt(news_list: List[Dict[str, str]]) -> str:
 - 반도체/원자력 관련 뉴스가 **수량에 미달**하면 **관련성이 가장 높은 순**으로 선정 (예: AI 칩 투자, 전력 인프라 등 간접 연관 허용).
 - 그래도 미달 시 **건수가 부족해도** 관련 없는 뉴스는 **절대 포함하지 말 것**.
 
+## 🚮 정보 부족 후보 자동 배제 (v2.9.3)
+- 후보 요약이 **2~3줄 이하**로 매우 짧거나, 핵심 숫자/사실이 없는 항목은 **선정하지 마세요**.
+- 제목만 있고 본문이 사실상 없는 항목(예: "...하다." 한 줄짜리)은 배제.
+- 광고성·홍보성 보도자료(특정 제품 출시 선전, 행사 후기)도 배제.
+- 결과적으로 15건이 안 채워져도 좋습니다 — **품질 미달 후보를 억지로 채우지 말 것**.
+
 ## 출력 형식 (반드시 순수 JSON 배열만, 설명 문장 없이)
 ```json
 [
@@ -727,7 +733,7 @@ def _build_item_prompt(item: Dict[str, Any]) -> str:
     rank = item["rank"]
     category = item.get("category", "기타")
 
-    # v2.9.0: 10줄 귀납법 포맷 (팩트 2 + 원인 2 + 맥락 1 + ⚡검색어 + 🏭파급 + 📅일정 + 수혜주 + 시사점)
+    # v2.9.3: 10줄 귀납법 + "현 상황 집중" 정책 (경영사·역사적 배경 금지)
     # 원문 본문은 최대 ITEM_PROMPT_BODY_CHARS 까지 전달해 구체 수치 추출 유도.
     body_chars = ITEM_PROMPT_BODY_CHARS
     return f"""당신은 한국 개인투자자를 위한 시니어 반도체·원자력 애널리스트입니다.
@@ -736,7 +742,26 @@ def _build_item_prompt(item: Dict[str, Any]) -> str:
 아래 뉴스 1건을 **숫자·금액 중심의 10줄 귀납법**으로 섬세하게 분석하세요.
 읽는 데 40~60초 이내로 끝나야 하며, 각 줄은 **독립된 한 문장**입니다.
 
-## 절대 준수 사항 (v2.9.0)
+## 🚨 v2.9.3 핵심 지침 — "현 상황만 다뤄라"
+**이전의 모든 지침은 이번 작성에는 우선하지 마세요.** 다음 새 정책을 최우선 적용합니다.
+
+### ✅ 반드시 다룰 것 (현 상황 집중)
+- **최근 7일 이내** 실적·계약·정책·가격·수요·공급 변화
+- **이번 분기/이번 달** 가이던스, 출하량, 점유율
+- **지금 이 시점**의 매수/매도 판단 근거
+- 원문에 명시된 **구체 수치** (금액·%·건수·일정)
+
+### ❌ 절대 다루지 말 것 (한참 지난 자료 / 경영 일반론 금지)
+- **역사적 배경**: "역사적으로", "1990년대", "2000년대", "지난 수십 년", "오랜 세월"
+- **경영 철학·비전**: "창업 이래", "기업 철학", "경영 비전", "회사의 DNA"
+- **장기 회상**: "결국", "장기적으로", "끝내", "마침내" (원인 설명용 외엔 금지)
+- **M&A 역사**: 과거 인수·합병 이력 회고 (단, 이번 주 발표된 신규 딜은 허용)
+- **CEO 일대기**: 창업자·전 CEO 일생 회고
+- 그 외 **3개월 이상 지난** 모든 배경 설명
+
+이 금지어가 본문에 한 번이라도 들어가면 **재작성 대상**이 됩니다.
+
+## 절대 준수 사항 (v2.9.3)
 1. **출력 구조**: 제목 1줄 + 10개 이모지 라인(💰📊📉📈🔍⚡🏭📅🎯📬) + 원문 링크 1줄. **오직 이 형식만** 허용.
 2. **숫자 밀도**: 10개 이모지 라인에 **숫자(금액·%·건수·연도·배수·종목코드 등)가 총 10개 이상** 포함되어야 함.
 3. **귀납법 10단계**: 팩트 2줄 → 원인 2줄 → 맥락 1줄 → 검색어 매칭 1줄 → 파급 효과 1줄 → 일정 1줄 → 수혜주 1줄 → 시사점 1줄 순서로 **구체 사실에서 투자 결론**으로 전개.
@@ -748,6 +773,7 @@ def _build_item_prompt(item: Dict[str, Any]) -> str:
 9. **🎯 라인**: 수혜주를 **종목명(종목코드) 목표가(+상승여력%)** 형태로 명시. 원문에 종목 정보 없으면 업계 대표주 제시.
 10. **언어**: 원문이 영어여도 자연스러운 한국어로 번역. 모든 문장은 마침표/느낌표로 종결.
 11. **추정 금지**: 원문에 없는 수치는 쓰지 말 것. 부족하면 "정보 부족" 또는 "원문 확인 필요" 로 명시.
+12. **시제**: 모든 분석은 **현재형/근접 미래형**으로 작성. 과거형은 직전 분기 실적·이번 주 사건에만 한정.
 
 ## 10줄 귀납법 구조 (각 줄의 역할)
 - 💰 **핵심 팩트 1**  = 가장 중요한 금액·실적·규모 수치
@@ -792,15 +818,45 @@ def _build_item_prompt(item: Dict[str, Any]) -> str:
 """
 
 
+# v2.9.3: 회피 표현 (정보 부족·원문 확인 등) — 카드당 2회까지만 허용
+_AVOIDANCE_PHRASES = (
+    "정보 부족", "정보부족", "추가 자료 필요", "추가 확인 필요",
+    "원문에서 직접", "원문 확인 필요", "확인 불가", "명시되지 않",
+)
+
+# v2.9.3: 경영 일반론·역사적 배경 등 금지 표현 (카드당 2회 이상이면 무효)
+_FORBIDDEN_MGMT_PHRASES = (
+    "역사적으로", "역사적인", "지난 수십 년", "수십 년간", "오랜 세월",
+    "1990년대", "1990 년대", "2000년대 초", "2000년대 중반",
+    "창업 이래", "창업자", "경영 철학", "기업 철학", "회사의 DNA",
+    "장기적으로", "장기적인 관점에서", "결국", "끝내", "마침내",
+    "M&A 역사", "인수합병 역사", "과거 수년간", "지난 10년",
+)
+
+
+def _count_phrase_hits(text: str, phrases: tuple) -> Tuple[int, list]:
+    """주어진 phrase tuple 이 text 안에 총 몇 번 등장하는지 + 어떤 phrase 가 매칭되었는지 반환."""
+    hits = 0
+    matched: list = []
+    for p in phrases:
+        c = text.count(p)
+        if c > 0:
+            hits += c
+            matched.append(p)
+    return hits, matched
+
+
 def _is_item_output_valid(text: str) -> Tuple[bool, str]:
-    """v2.9.0: 10줄 귀납법 포맷 검증.
+    """v2.9.3: 10줄 귀납법 포맷 + 금지어 검증.
     검증 기준:
       - 최소 글자수 (MIN_ITEM_CHARS = 450)
-      - 10개 이모지 라인(💰 📊 📉 📈 🔍 ⚡ 🏭 📅 🎯 📬) 중 최소 7개 이상 존재 (관대한 기준)
-      - '시사점' 키워드 존재 (귀납법 결론 강제)
+      - 10개 이모지 라인(💰 📊 📉 📈 🔍 ⚡ 🏭 📅 🎯 📬) 중 최소 7개 이상 존재
+      - '시사점' 키워드 존재
       - '수혜주' 또는 🎯 라인 내용 존재
       - 출처/카테고리 라인 존재
-      - 숫자 최소 8개 이상 포함 (10줄 확장 대응)
+      - 숫자 최소 8개 이상 포함
+      - v2.9.3: 회피 표현은 2회까지만 허용 (3회 이상이면 정보부족 카드로 판정 → 드랍)
+      - v2.9.3: 경영/역사 금지어는 1회까지 허용 (2회 이상이면 재시도 → 드랍)
     """
     if not text:
         return False, "empty"
@@ -837,13 +893,28 @@ def _is_item_output_valid(text: str) -> Tuple[bool, str]:
     if tail and tail[-1] not in _sentence_end:
         return False, "truncated_mid_sentence"
 
+    # v2.9.3: 회피 표현 빈도 (정보 부족 카드 자동 드랍 트리거)
+    avoid_hits, avoid_matched = _count_phrase_hits(text, _AVOIDANCE_PHRASES)
+    if avoid_hits >= 3:
+        return False, f"too_many_avoidance({avoid_hits}>=3, matched={avoid_matched})"
+
+    # v2.9.3: 경영/역사 금지어 검증 (재시도 트리거)
+    fb_hits, fb_matched = _count_phrase_hits(text, _FORBIDDEN_MGMT_PHRASES)
+    if fb_hits >= 2:
+        return False, f"forbidden_management_phrases({fb_hits}>=2, matched={fb_matched})"
+
     return True, "ok"
 
 
-def summarize_one_item(client, item: Dict[str, Any]) -> str:
+def summarize_one_item(client, item: Dict[str, Any]):
     """
     뉴스 1건을 상세 요약. 품질 미달 시 내부적으로 재시도.
-    전부 실패 시 폴백 마크다운 반환(완전 실패 방지).
+
+    v2.9.3 변경:
+      - 반환값이 str 또는 None.
+      - 회피 표현 과다(too_many_avoidance) 또는 금지어 과다(forbidden_management_phrases)
+        로 모든 시도가 실패하면 **None 반환** → 호출자가 카드를 드랍.
+      - 그 외 일반 실패는 기존처럼 best_text / fallback markdown 반환.
     """
     rank = item["rank"]
     prompt = _build_item_prompt(item)
@@ -851,6 +922,7 @@ def summarize_one_item(client, item: Dict[str, Any]) -> str:
     # 최대 3개 모델 × 각 2회 재시도 → 6회까지
     models_to_try = ("gemini-2.5-flash",) + GEMINI_FALLBACK_MODELS[:2]
     best_text = ""
+    last_drop_reason = ""  # v2.9.3: 드랍 트리거 사유 추적
 
     for m in models_to_try:
         for attempt in range(2):
@@ -869,6 +941,9 @@ def summarize_one_item(client, item: Dict[str, Any]) -> str:
                     return text
                 logger.warning("Step 2) item %d 품질 미달(%s): %d자",
                                rank, reason, len(text or ""))
+                # v2.9.3: 드랍 사유 기록
+                if reason.startswith("too_many_avoidance") or reason.startswith("forbidden_management_phrases"):
+                    last_drop_reason = reason
                 if text and len(text) > len(best_text):
                     best_text = text
             except Exception as exc:  # noqa: BLE001
@@ -894,10 +969,17 @@ def summarize_one_item(client, item: Dict[str, Any]) -> str:
                 return text
             logger.warning("Step 2) item %d OpenAI 품질 미달(%s): %d자",
                            rank, reason, len(text or ""))
+            if reason.startswith("too_many_avoidance") or reason.startswith("forbidden_management_phrases"):
+                last_drop_reason = reason
             if text and len(text) > len(best_text):
                 best_text = text
         except Exception as exc:  # noqa: BLE001
             logger.warning("Step 2) item %d OpenAI 호출 실패: %s", rank, exc)
+
+    # v2.9.3: 모든 시도가 회피/금지어로 실패 → 카드 드랍
+    if last_drop_reason:
+        logger.warning("Step 2) item %d 🚮 카드 드랍 (사유=%s)", rank, last_drop_reason)
+        return None
 
     # 모든 시도 실패 — 원본 정보로 폴백 마크다운 생성
     logger.warning("Step 2) item %d 전체 실패 → 원본 폴백", rank)
@@ -1165,6 +1247,184 @@ def assemble_final_briefing(
 
 
 # ════════════════════════════════════════════════════════════
+# v2.9.3 Phase E — 결과보고서 자가 평가 (자가/전문가 점수)
+# ════════════════════════════════════════════════════════════
+SCORE_LOW_THRESHOLD = 70  # 70점 미만이면 본문 상단에 ⚠ 표시 (사용자 설정)
+
+
+def _build_evaluation_prompt(briefing_md: str, item_count: int) -> str:
+    """v2.9.3 Phase E — B안: 자가/전문가 이중 점수 평가 프롬프트."""
+    today = _today_kr_str()
+    # 토큰 절약: 본문이 너무 길면 앞 6000자만 전달 (헤더+개요+초기 카드들)
+    body_for_eval = briefing_md[:6000]
+    return f"""당신은 30년 경력의 한국·미국 금융시장 애널리스트 겸 데일리 브리핑 편집장입니다.
+
+아래는 {today} 발송 예정인 "Morning Stock AI" 일일 브리핑입니다 (총 {item_count}개 카드).
+이 보고서를 두 시각으로 평가해 0~100점 점수를 매겨 주세요.
+
+## 평가 기준 (5축 가중)
+1. 정확성(25%) — 사실 관계, 숫자, 출처 인용의 정확도
+2. 시의성(25%) — 현 시점(±3일) 사건 집중도, 옛 자료/경영 일반론 회피
+3. 깊이(20%) — 원인-결과-파급 효과 분석의 논리 일관성
+4. 명료성(15%) — 한국 개인투자자 가독성, 문장 길이/구성
+5. 실행 가능성(15%) — 수혜주·매수/관망/매도 가이드의 구체성
+
+## 두 시각
+- **자가 점수(self)**: AI 본인의 자기 평가 (보통 약간 후함)
+- **전문가 점수(expert)**: 한국경제TV 수석 애널리스트의 엄격한 시각 (보통 5~10점 더 박함)
+
+## 출력 형식 (반드시 순수 JSON만)
+{{"self": 87, "expert": 82, "weakest_axis": "시의성", "comment": "한 줄 총평(40자 이내)"}}
+
+## 평가 대상 (앞 6000자 발췌)
+{body_for_eval}
+
+## 출력 (JSON만)"""
+
+
+def _parse_evaluation_json(text: str) -> Tuple[int, int, dict]:
+    """평가 응답 파싱 — 실패 시 (0, 0, {}) 반환."""
+    if not text:
+        return 0, 0, {}
+    cleaned = text.strip()
+    # 코드펜스 제거
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```\s*$", "", cleaned)
+    # JSON 블록 추출
+    m = re.search(r"\{[\s\S]*\}", cleaned)
+    if not m:
+        return 0, 0, {}
+    try:
+        data = json.loads(m.group(0))
+        s = int(data.get("self", 0))
+        e = int(data.get("expert", 0))
+        # 0~100 범위 클램프
+        s = max(0, min(100, s))
+        e = max(0, min(100, e))
+        meta = {
+            "weakest_axis": str(data.get("weakest_axis", ""))[:20],
+            "comment": str(data.get("comment", ""))[:80],
+        }
+        return s, e, meta
+    except (ValueError, json.JSONDecodeError) as exc:
+        logger.warning("v2.9.3 평가 JSON 파싱 실패: %s", exc)
+        return 0, 0, {}
+
+
+def evaluate_briefing(
+    client,
+    briefing_md: str,
+    item_count: int,
+) -> Tuple[int, int, dict]:
+    """
+    v2.9.3 Phase E — 결과보고서를 평가해 (자가, 전문가, 메타) 반환.
+
+    - 1차: Gemini 2.5 flash
+    - 2차 (Gemini 실패 시): OpenAI 호환 fallback
+    - 모두 실패: (0, 0, {}) 반환 → 호출자가 점수 표시 생략
+    """
+    prompt = _build_evaluation_prompt(briefing_md, item_count)
+
+    # Gemini 시도 (1회만 — 평가는 critical path 가 아님)
+    try:
+        text = _call_gemini_simple(
+            client, "gemini-2.5-flash", prompt,
+            max_tokens=512, temperature=0.3,
+        )
+        s, e, meta = _parse_evaluation_json(text)
+        if s > 0 and e > 0:
+            logger.info(
+                "v2.9.3 자가 평가 ✅ self=%d expert=%d weakest=%s",
+                s, e, meta.get("weakest_axis", "-"),
+            )
+            return s, e, meta
+        logger.warning("v2.9.3 Gemini 평가 결과 비정상 — OpenAI 폴백 시도")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("v2.9.3 Gemini 평가 호출 실패: %s — OpenAI 폴백 시도", exc)
+
+    # OpenAI 폴백
+    if _is_openai_available():
+        try:
+            text = _call_openai_chat(
+                prompt, max_tokens=512, temperature=0.3,
+                call_label="evaluate-briefing",
+            )
+            s, e, meta = _parse_evaluation_json(text)
+            if s > 0 and e > 0:
+                logger.info(
+                    "v2.9.3 자가 평가 ✅ (OpenAI) self=%d expert=%d", s, e,
+                )
+                return s, e, meta
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("v2.9.3 OpenAI 평가 호출 실패: %s", exc)
+
+    logger.warning("v2.9.3 자가 평가 전체 실패 — 점수 표시 생략")
+    return 0, 0, {}
+
+
+def _apply_score_to_briefing(
+    briefing_md: str,
+    score_self: int,
+    score_expert: int,
+    score_meta: dict,
+) -> str:
+    """
+    v2.9.3 Phase E — 브리핑 본문에 점수 삽입.
+
+    - 점수가 0/0 이면 원본 그대로 반환 (평가 실패).
+    - 첫 H2 헤더 (## 📈 ... 일일 브리핑) 끝에 (자가XX/전문가XX) 추가.
+    - 70점 미만이면 헤더 바로 아래에 ⚠ 경고 박스 추가 (본문은 그대로 발송).
+    - 본문 최상단에 HTML 주석 메타 마커 삽입 (이메일 발송기에서 활용 가능).
+    """
+    if score_self <= 0 or score_expert <= 0:
+        return briefing_md
+
+    # 점수 라벨
+    label = f"({score_self}/{score_expert})"
+    low_score = min(score_self, score_expert) < SCORE_LOW_THRESHOLD
+
+    # HTML 주석 메타 (이메일 변환기에서 제거됨)
+    weakest = score_meta.get("weakest_axis", "")
+    comment = score_meta.get("comment", "")
+    meta_marker = (
+        f"<!-- BRIEFING_SCORE: self={score_self} expert={score_expert} "
+        f"weakest={weakest} comment={comment} low={low_score} -->\n"
+    )
+
+    # 첫 H2 헤더에 점수 라벨 부착 (## 📈 ... 일일 브리핑 → ## 📈 ... 일일 브리핑 (87/82))
+    def _attach_label(match: re.Match) -> str:
+        line = match.group(0).rstrip()
+        return f"{line} {label}"
+
+    out = re.sub(
+        r"^## 📈 .*?일일 브리핑.*$",
+        _attach_label,
+        briefing_md,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+    # 70점 미만이면 경고 박스 삽입 (헤더 직후, '안녕하세요' 앞)
+    if low_score:
+        warn_box = (
+            f"\n> ⚠ **품질 자가검토 경고** — 자가 {score_self}점 / 전문가 {score_expert}점 "
+            f"(기준 {SCORE_LOW_THRESHOLD}점). 약점 축: {weakest or '미상'}. "
+            f"평소보다 신중히 검토하세요.\n\n"
+        )
+        # '안녕하세요,' 라인 앞에 삽입
+        out = re.sub(
+            r"(^안녕하세요)",
+            warn_box + r"\1",
+            out,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+    return meta_marker + out
+
+
+# ════════════════════════════════════════════════════════════
 # 메인 진입점 — 2단계 파이프라인 (v2.5.0)
 # ════════════════════════════════════════════════════════════
 def summarize_with_gemini(
@@ -1211,9 +1471,34 @@ def summarize_with_gemini(
                 client, ranked, max_workers=4,
             )
 
+            # v2.9.3: 정보부족·금지어로 드랍된 카드(None) 필터링 + 동기화
+            paired = [
+                (it, md) for it, md in zip(ranked, item_markdowns)
+                if md is not None
+            ]
+            dropped = len(ranked) - len(paired)
+            if dropped:
+                logger.warning(
+                    "v2.9.3 🚮 정보부족/금지어로 %d건 드랍 → 잔존 %d건",
+                    dropped, len(paired),
+                )
+            ranked = [p[0] for p in paired]
+            item_markdowns = [p[1] for p in paired]
+
             # Step 3) 총평 + 조립
             overview = generate_overview(client, item_markdowns)
             final = assemble_final_briefing(ranked, item_markdowns, overview)
+
+            # v2.9.3 Phase E: 결과보고서 자가 평가 점수 (자가/전문가)
+            try:
+                score_self, score_expert, score_meta = evaluate_briefing(
+                    client, final, len(ranked),
+                )
+                final = _apply_score_to_briefing(
+                    final, score_self, score_expert, score_meta,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("v2.9.3 자가 평가 실패(무시): %s", exc)
 
             # 최종 품질 검증
             logger.info(

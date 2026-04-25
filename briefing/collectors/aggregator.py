@@ -116,6 +116,27 @@ def collect_all_data(
 
     print(f"\n✨ 중복 제거 후 최종: {len(deduped)}건 (원본 {len(all_news)}건)")
 
+    # ── 4) 저정보 기사 필터 (v2.9.3) ──────────────────────
+    # 사용자 지침(2026-04-25): "정보 부족 기사는 정리하지 말고 버려"
+    # 임계값: summary < MIN_ARTICLE_CHARS (기본 800자)
+    # 환경변수 MIN_ARTICLE_CHARS 로 조정 가능 (테스트시 0 으로 비활성화)
+    min_chars = int(os.getenv("MIN_ARTICLE_CHARS", "800"))
+    if min_chars > 0:
+        filtered: List[Dict[str, str]] = []
+        dropped = 0
+        for item in deduped:
+            summary = (item.get("summary") or "").strip()
+            if len(summary) < min_chars:
+                dropped += 1
+                logger.info(
+                    "저정보 기사 제외 (%d자 < %d자): %s",
+                    len(summary), min_chars, (item.get("title") or "")[:60]
+                )
+                continue
+            filtered.append(item)
+        print(f"🧹 저정보 필터(<{min_chars}자) 적용: {dropped}건 제외 → 최종 {len(filtered)}건 (v2.9.3)")
+        deduped = filtered
+
     # v2.4.0: 리포터에 최종 결과 전송 (이력 기록)
     try:
         reporter.finish_run(

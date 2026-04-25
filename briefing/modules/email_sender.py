@@ -241,7 +241,11 @@ def _md_to_html(md: str) -> str:
       본문
 
     섹션별로 다른 HTML 컴포넌트 렌더링.
+
+    v2.9.3: BRIEFING_SCORE HTML 주석 마커 사전 제거 (메일 본문에서는 보이지 않게).
     """
+    # v2.9.3: 점수 메타 주석 제거 (이메일 본문에서는 노출 X)
+    md = re.sub(r"<!--\s*BRIEFING_SCORE:[^>]*-->\s*", "", md)
     html_lines: List[str] = []
     # 상태 머신: 현재 파싱 중인 뉴스 카드
     current_item: Optional[dict] = None

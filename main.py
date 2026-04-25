@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
 import traceback
 from datetime import datetime, timezone, timedelta
@@ -533,8 +534,28 @@ def run_stage_send() -> int:
         else:
             _record_retry_stats(date, attempts=attempts_used, success=True)
 
-        # 3) 발송
-        subject = f"🌅 Morning Stock AI — 일일 주식·반도체 브리핑 ({_today_label()})"
+        # 3) 발송 (v2.9.3: BRIEFING_SCORE 메타에서 자가/전문가 점수 추출)
+        score_label = ""
+        score_match = re.search(
+            r"<!--\s*BRIEFING_SCORE:\s*self=(\d+)\s+expert=(\d+)[^>]*low=(True|False|1|0)",
+            markdown or "",
+        )
+        if score_match:
+            s, e, low_flag = score_match.group(1), score_match.group(2), score_match.group(3)
+            warn_emoji = " ⚠️" if low_flag in ("True", "1") else ""
+            score_label = f" ({s}/{e}){warn_emoji}"
+            logger.info("v2.9.3 제목 점수 라벨 적용: %s", score_label.strip())
+        else:
+            # 하위 호환 (low 플래그 없는 구버전)
+            sm2 = re.search(
+                r"<!--\s*BRIEFING_SCORE:\s*self=(\d+)\s+expert=(\d+)",
+                markdown or "",
+            )
+            if sm2:
+                s, e = sm2.group(1), sm2.group(2)
+                score_label = f" ({s}/{e})"
+                logger.info("v2.9.3 제목 점수 라벨 적용(low 미상): %s", score_label.strip())
+        subject = f"🌅 Morning Stock AI{score_label} — 일일 주식·반도체 브리핑 ({_today_label()})"
         try:
             from briefing.modules.email_sender import (
                 build_html_email, resolve_recipients, send_email,
@@ -689,8 +710,27 @@ def run_pipeline() -> int:
     print(markdown_summary[:700] + ("..." if len(markdown_summary) > 700 else ""))
     print("─" * 70 + f"\n(총 {len(markdown_summary):,} chars)\n")
 
-    # 4) 이메일 발송
-    subject = f"🌅 Morning Stock AI — 일일 주식·반도체 브리핑 ({today_str})"
+    # 4) 이메일 발송 (v2.9.3: 자가 평가 점수가 있으면 제목에 표시 + 70점 미만 ⚠️)
+    score_label = ""
+    score_match = re.search(
+        r"<!--\s*BRIEFING_SCORE:\s*self=(\d+)\s+expert=(\d+)[^>]*low=(True|False|1|0)",
+        markdown_summary,
+    )
+    if score_match:
+        s, e, low_flag = score_match.group(1), score_match.group(2), score_match.group(3)
+        warn_emoji = " ⚠️" if low_flag in ("True", "1") else ""
+        score_label = f" ({s}/{e}){warn_emoji}"
+        logger.info("v2.9.3 제목 점수 라벨 적용: %s", score_label.strip())
+    else:
+        sm2 = re.search(
+            r"<!--\s*BRIEFING_SCORE:\s*self=(\d+)\s+expert=(\d+)",
+            markdown_summary,
+        )
+        if sm2:
+            s, e = sm2.group(1), sm2.group(2)
+            score_label = f" ({s}/{e})"
+            logger.info("v2.9.3 제목 점수 라벨 적용(low 미상): %s", score_label.strip())
+    subject = f"🌅 Morning Stock AI{score_label} — 일일 주식·반도체 브리핑 ({today_str})"
     if dry_run:
         from briefing.modules.email_sender import build_html_email, resolve_recipients
         sender = os.getenv("EMAIL_SENDER", "(미설정)")
