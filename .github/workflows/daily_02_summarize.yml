@@ -10,7 +10,7 @@ name: Morning Stock AI — 2/3 Summarize
 on:
   schedule:
     # 06:10 KST (= 21:10 UTC) — collect(06:00) 완료 후 10분 여유
-    - cron: '10 21 * * *'
+    - cron: '0 21 * * *'
   workflow_dispatch: {}
   # v2.7.0 (2026-04-24): workflow_run 트리거 제거.
   # 사유: schedule + workflow_run 이중 트리거로 하루 2~3회 중복 실행되어
