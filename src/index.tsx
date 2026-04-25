@@ -1513,6 +1513,120 @@ app.post('/api/public/pipeline/send', async (c) => {
   }
 })
 
+// ───────────────────────────────────────────────────────────────────────
+// v2.9.2 (2026-04-25): 발송 락(Lock) + 재시도 통계 엔드포인트
+// 목적: Stage 3 가 Stage 2 완료를 기다리며 4회 재시도 + 동시 발송 방지.
+// ───────────────────────────────────────────────────────────────────────
+const KV_KEY_PIPELINE_LOCK_PFX = 'pipeline:lock:'        // pipeline:lock:YYYYMMDD
+const KV_KEY_PIPELINE_RETRY_PFX = 'pipeline:retry:'      // pipeline:retry:YYYYMMDD
+const PIPELINE_LOCK_TTL_DEFAULT = 300  // 5분 (락 자동 만료)
+
+/**
+ * v2.9.2: 발송 락 상태 조회 (점유 중인지 확인).
+ * GET /api/public/pipeline/lock?date=YYYYMMDD
+ */
+app.get('/api/public/pipeline/lock', async (c) => {
+  const auth = checkReportToken(c)
+  if (!auth.ok) return c.json({ ok: false, error: `인증 실패: ${auth.reason}` }, 401)
+
+  try {
+    const date = (c.req.query('date') || '').match(/^\d{8}$/)
+      ? c.req.query('date')!
+      : kstDateKey()
+    const lockKey = KV_KEY_PIPELINE_LOCK_PFX + date
+    const value = await c.env.SOURCES_KV.get(lockKey, 'json') as
+      | { owner: string; acquiredAt: number; ttl: number }
+      | null
+
+    if (!value) {
+      return c.json({ ok: true, locked: false, date }, 404)
+    }
+    return c.json({
+      ok: true,
+      locked: true,
+      date,
+      owner: value.owner,
+      acquiredAt: value.acquiredAt,
+      ttl: value.ttl,
+    })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/**
+ * v2.9.2: 발송 락 획득.
+ * POST /api/public/pipeline/lock  body: { date, owner, ttl? }
+ */
+app.post('/api/public/pipeline/lock', async (c) => {
+  const auth = checkReportToken(c)
+  if (!auth.ok) return c.json({ ok: false, error: `인증 실패: ${auth.reason}` }, 401)
+
+  try {
+    const body = await c.req.json() as { date?: string; owner?: string; ttl?: number }
+    const date = (body.date && /^\d{8}$/.test(body.date)) ? body.date : kstDateKey()
+    const owner = String(body.owner || 'unknown').slice(0, 100)
+    const ttl = Math.max(60, Math.min(900, body.ttl ?? PIPELINE_LOCK_TTL_DEFAULT))
+
+    const lockKey = KV_KEY_PIPELINE_LOCK_PFX + date
+    await c.env.SOURCES_KV.put(
+      lockKey,
+      JSON.stringify({ owner, acquiredAt: Date.now(), ttl }),
+      { expirationTtl: ttl },
+    )
+    return c.json({ ok: true, date, owner, ttl })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/**
+ * v2.9.2: 발송 락 해제 (정상 발송 완료 후).
+ * POST /api/public/pipeline/lock/release  body: { date }
+ */
+app.post('/api/public/pipeline/lock/release', async (c) => {
+  const auth = checkReportToken(c)
+  if (!auth.ok) return c.json({ ok: false, error: `인증 실패: ${auth.reason}` }, 401)
+
+  try {
+    const body = await c.req.json() as { date?: string }
+    const date = (body.date && /^\d{8}$/.test(body.date)) ? body.date : kstDateKey()
+    const lockKey = KV_KEY_PIPELINE_LOCK_PFX + date
+    await c.env.SOURCES_KV.delete(lockKey)
+    return c.json({ ok: true, date, released: true })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/**
+ * v2.9.2: 재시도 통계 기록.
+ * POST /api/public/pipeline/retry_stats  body: { date, attempts, success, stage }
+ * 목적: 재시도 패턴을 추적해 v3.0 cron 시간 결정에 활용.
+ */
+app.post('/api/public/pipeline/retry_stats', async (c) => {
+  const auth = checkReportToken(c)
+  if (!auth.ok) return c.json({ ok: false, error: `인증 실패: ${auth.reason}` }, 401)
+
+  try {
+    const body = await c.req.json() as {
+      date?: string; attempts?: number; success?: boolean; stage?: string
+    }
+    const date = (body.date && /^\d{8}$/.test(body.date)) ? body.date : kstDateKey()
+    const attempts = Math.max(0, Math.min(10, body.attempts ?? 0))
+    const success = !!body.success
+    const stage = String(body.stage || 'send').slice(0, 50)
+
+    const statsKey = KV_KEY_PIPELINE_RETRY_PFX + date
+    const stat = { date, stage, attempts, success, recordedAt: Date.now() }
+    await c.env.SOURCES_KV.put(statsKey, JSON.stringify(stat),
+      { expirationTtl: 86400 * 30 })  // 30일 보관 (분석용)
+    return c.json({ ok: true, ...stat })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
 /**
  * v2.6.0: 관리 UI 용 파이프라인 상태 조회.
  * GET /api/admin/pipeline-state?date=YYYYMMDD   (date 생략 시 KST 오늘)

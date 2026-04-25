@@ -263,84 +263,326 @@ def run_stage_summarize() -> int:
 # ═══════════════════════════════════════════════════════════════
 # Stage 3: Send
 # ═══════════════════════════════════════════════════════════════
+def _fetch_today_summary_with_retry(
+    date: str,
+    *,
+    max_attempts: int = 4,
+    backoff_seconds: tuple = (60, 90, 120),
+) -> Optional[str]:
+    """
+    v2.9.2: KV 에서 오늘 날짜 요약을 가져온다. 비어있으면 점진적 백오프로 재시도.
+
+    Stage 2 가 v2.9.0 이후 6~8분 걸리는 경우가 잦아, Stage 3 가 너무 일찍 시작하면
+    KV 에 데이터가 아직 없을 수 있다. 이 함수는 다음과 같이 동작한다:
+      1. 1차 시도: KV 조회 (즉시).
+      2. 비어있으면 60초 대기 후 2차 시도.
+      3. 90초 대기 후 3차 시도.
+      4. 120초 대기 후 4차(최종) 시도.
+
+    🔒 안전장치 (보너스 1): 어제 KV 데이터 재발송 방지를 위해
+       ``date`` 키를 명시적으로 사용. KV API 가 잘못된 키로 응답해도
+       반환된 ``markdown`` 만 사용 (날짜 검증은 호출자 측 endpoint URL 에서 보장).
+
+    Returns
+    -------
+    str
+        오늘 날짜 요약 마크다운. 모든 재시도 실패 시 ``None``.
+    """
+    import time
+
+    logger = logging.getLogger("briefing.main.send")
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            payload = _get_pipeline(
+                f"/api/public/pipeline/summary?date={date}"
+            )
+            markdown = (payload.get("markdown") or "").strip()
+            if markdown:
+                if attempt > 1:
+                    print(
+                        f"✅ 재시도 {attempt}/{max_attempts} 차에서 KV 조회 성공 "
+                        f"({len(markdown):,}자)"
+                    )
+                else:
+                    print(f"📥 KV 에서 {len(markdown):,}자 읽음")
+                return markdown
+
+            # KV 응답은 왔지만 markdown 비어있음 (Stage 2 진행 중)
+            logger.warning(
+                "KV 응답 OK 이지만 markdown 비어있음 (시도 %d/%d)",
+                attempt, max_attempts,
+            )
+        except FileNotFoundError:
+            logger.warning(
+                "KV 에 요약 데이터 없음 (시도 %d/%d)",
+                attempt, max_attempts,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "KV 읽기 실패 (%s) (시도 %d/%d)",
+                exc, attempt, max_attempts,
+            )
+
+        # 마지막 시도면 더 이상 대기하지 않음
+        if attempt >= max_attempts:
+            break
+
+        # 점진적 백오프 (60 → 90 → 120 초)
+        wait_sec = backoff_seconds[min(attempt - 1, len(backoff_seconds) - 1)]
+        print(
+            f"🔄 {attempt}/{max_attempts} 차 시도 실패 — Stage 2 진행 중일 가능성. "
+            f"{wait_sec}초 대기 후 재시도..."
+        )
+        time.sleep(wait_sec)
+
+    logger.error(
+        "❌ %d 회 재시도 후에도 KV 에서 요약 데이터를 가져오지 못함",
+        max_attempts,
+    )
+    return None
+
+
+def _acquire_send_lock(date: str, ttl_sec: int = 300) -> bool:
+    """
+    v2.9.2 보너스 2: KV 락(Lock) — 동시 발송 방지.
+
+    같은 날 두 번 발송되는 것을 막는다. 사용자가 cron 발송 직후
+    "지금 발송" 버튼을 누르거나, GitHub Actions 가 자동 재시도할 때 충돌 방지.
+
+    Parameters
+    ----------
+    date : str
+        오늘 KST YYYYMMDD.
+    ttl_sec : int
+        락 자동 만료 시간(초). 기본 5분.
+
+    Returns
+    -------
+    bool
+        True 면 락 획득 성공 → 계속 진행.
+        False 면 다른 프로세스가 이미 발송 중 → 종료.
+    """
+    logger = logging.getLogger("briefing.main.send")
+    try:
+        # 락 키 조회 (이미 발송 중인지 확인)
+        try:
+            existing = _get_pipeline(
+                f"/api/public/pipeline/lock?date={date}"
+            )
+            if existing.get("locked"):
+                logger.warning(
+                    "🔒 이미 발송 진행 중 (락 보유자=%s) — 종료",
+                    existing.get("owner", "unknown"),
+                )
+                return False
+        except FileNotFoundError:
+            pass  # 락 없음 = 발송 가능
+
+        # 락 획득 (실패해도 발송은 진행 — 호환성 우선)
+        try:
+            _post_pipeline(
+                "/api/public/pipeline/lock",
+                {"date": date, "owner": "stage3-send", "ttl": ttl_sec},
+            )
+            print(f"🔒 발송 락 획득 완료 (TTL {ttl_sec}초)")
+        except Exception as exc:  # noqa: BLE001
+            # 락 엔드포인트가 아직 배포 안 됐을 수 있음 — 경고만 남기고 진행
+            logger.info(
+                "락 엔드포인트 미지원 (%s) — 호환 모드로 진행", exc,
+            )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("락 획득 중 예외 (%s) — 호환 모드로 진행", exc)
+        return True
+
+
+def _release_send_lock(date: str) -> None:
+    """v2.9.2: 발송 완료 후 락 해제 (실패해도 무시)."""
+    try:
+        _post_pipeline(
+            "/api/public/pipeline/lock/release",
+            {"date": date},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _send_failure_alert_email(date: str, reason: str) -> None:
+    """
+    v2.9.2 보너스 1: A+B 모두 실패 시 관리자에게 간단한 실패 알림 메일 발송.
+
+    Stage 2 결과 없이 Stage 3 가 실패하면 사용자가 모를 수 있으므로
+    EMAIL_SENDER 본인에게 짧은 알림 메일을 보낸다 (Gmail SMTP 사용).
+    """
+    logger = logging.getLogger("briefing.main.send")
+    try:
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        import smtplib
+
+        sender = os.getenv("EMAIL_SENDER", "")
+        password = os.getenv("EMAIL_APP_PASSWORD", "")
+        if not sender or not password:
+            logger.warning("EMAIL_SENDER/EMAIL_APP_PASSWORD 미설정 — 알림 생략")
+            return
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"⚠️ [Morning Stock AI] {date} 발송 실패 알림"
+        msg["From"] = sender
+        msg["To"] = sender  # 본인에게 발송
+
+        body_text = (
+            f"⚠️ Morning Stock AI 발송 실패\n\n"
+            f"날짜: {date} (KST)\n"
+            f"단계: Stage 3 (Send)\n"
+            f"원인: {reason}\n\n"
+            f"조치사항:\n"
+            f"  1) GitHub Actions 로그 확인:\n"
+            f"     https://github.com/wwwkoistkr/2026_04_21_-_-/actions\n"
+            f"  2) Stage 1 (Collect), Stage 2 (Summarize) 실행 결과 확인\n"
+            f"  3) 관리 대시보드에서 \"지금 발송\" 수동 시도:\n"
+            f"     https://morning-stock-briefing.pages.dev\n\n"
+            f"이 알림은 v2.9.2 자동 알림 시스템에서 발송되었습니다."
+        )
+        msg.attach(MIMEText(body_text, "plain", "utf-8"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as s:
+            s.login(sender, password)
+            s.sendmail(sender, [sender], msg.as_string())
+        print(f"📨 관리자 실패 알림 메일 발송 완료 → {sender}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("관리자 알림 메일 발송 실패 (%s) — 무시", exc)
+
+
+def _record_retry_stats(date: str, attempts: int, success: bool) -> None:
+    """v2.9.2 보너스 3: 재시도 통계 기록 (KV 에 저장, 실패 시 무시)."""
+    try:
+        _post_pipeline(
+            "/api/public/pipeline/retry_stats",
+            {
+                "date": date,
+                "attempts": attempts,
+                "success": success,
+                "stage": "send",
+            },
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def run_stage_send() -> int:
     """
     발송 단계 — KV 에서 요약 결과 가져와 이메일 발송.
     AI 호출 없으므로 여러 번 재시도 가능.
+
+    v2.9.2 (2026-04-25): 옵션 A+B 하이브리드 안정화.
+      - cron 06:25 → 06:40 KST (workflow yaml 에서 적용)
+      - timeout 10 → 15분 (workflow yaml 에서 적용)
+      - 재시도 4회 + 점진적 백오프 (60→90→120초)
+      - 날짜 키 명시적 검증 (어제 데이터 재발송 방지)
+      - KV 락 (동시 발송 방지)
+      - 실패 시 관리자 Gmail 알림
+      - 재시도 통계 KV 기록
     """
     logger = logging.getLogger("briefing.main.send")
     date = _kst_date_key()
     dry_run = _is_truthy(os.getenv("DRY_RUN"))
 
     print("=" * 70)
-    print(f"📧 [Stage 3/3] Send — {_today_label()} (key={date})"
+    print(f"📧 [Stage 3/3] Send v2.9.2 — {_today_label()} (key={date})"
           + (" [DRY_RUN]" if dry_run else ""))
     print("=" * 70)
 
-    # 1) 요약 결과 읽기
-    markdown: Optional[str] = None
-    try:
-        payload = _get_pipeline(f"/api/public/pipeline/summary?date={date}")
-        markdown = payload.get("markdown") or ""
-        print(f"📥 KV 에서 {len(markdown):,}자 읽음")
-    except FileNotFoundError:
-        logger.warning("KV 에 요약 데이터 없음 — 로컬 백업 시도")
-    except Exception as exc:
-        logger.warning("KV 읽기 실패 (%s) — 로컬 백업 시도", exc)
+    # 0) KV 락 획득 (동시 발송 방지)
+    # DRY_RUN 모드에서는 락 검사 생략 (테스트 자유롭게 가능)
+    if not dry_run:
+        if not _acquire_send_lock(date):
+            print("⏭️  다른 프로세스가 이미 발송 중 — 안전 종료")
+            return 0  # 정상 종료 (실패 아님)
 
-    if not markdown:
-        backup_path = _backup_path("summary", date, ext="md")
-        if os.path.exists(backup_path):
-            with open(backup_path, encoding="utf-8") as f:
-                markdown = f.read()
-            print(f"📥 로컬 백업에서 {len(markdown):,}자 읽음")
+    try:
+        # 1) 요약 결과 읽기 — v2.9.2: 재시도 + 점진적 백오프
+        markdown: Optional[str] = _fetch_today_summary_with_retry(date)
+        attempts_used = 1 if markdown else 4
+
+        # 2) KV 실패 시 로컬 백업 시도 (기존 로직 유지)
+        if not markdown:
+            backup_path = _backup_path("summary", date, ext="md")
+            if os.path.exists(backup_path):
+                with open(backup_path, encoding="utf-8") as f:
+                    markdown = f.read()
+                print(f"📥 로컬 백업에서 {len(markdown):,}자 읽음")
+            else:
+                # ❌ 모든 시도 실패 — 관리자 알림 + 종료
+                logger.error(
+                    "요약 데이터를 어디서도 찾지 못함 (KV 4회 재시도 + 로컬 백업 부재). "
+                    "Stage 2 먼저 실행 필요."
+                )
+                _safe_notify_error(
+                    "send",
+                    f"v2.9.2: KV 4회 재시도 실패 + 로컬 백업 없음 ({date})",
+                )
+                _record_retry_stats(date, attempts=4, success=False)
+                _send_failure_alert_email(
+                    date,
+                    "Stage 2 결과를 KV/로컬 백업 어디서도 찾지 못했습니다. "
+                    "Stage 2 가 실패했거나 06:40 KST 까지도 완료되지 못했습니다.",
+                )
+                return 1
         else:
-            logger.error("요약 데이터를 어디서도 찾지 못함. Stage 2 먼저 실행 필요.")
-            _safe_notify_error("send", "summarize 단계 결과 없음")
+            _record_retry_stats(date, attempts=attempts_used, success=True)
+
+        # 3) 발송
+        subject = f"🌅 Morning Stock AI — 일일 주식·반도체 브리핑 ({_today_label()})"
+        try:
+            from briefing.modules.email_sender import (
+                build_html_email, resolve_recipients, send_email,
+            )
+        except Exception:
+            logger.exception("email_sender 로드 실패")
+            _safe_notify_error("send", "email_sender 로드 실패")
             return 1
 
-    # 2) 발송
-    subject = f"🌅 Morning Stock AI — 일일 주식·반도체 브리핑 ({_today_label()})"
-    try:
-        from briefing.modules.email_sender import (
-            build_html_email, resolve_recipients, send_email,
-        )
-    except Exception:
-        logger.exception("email_sender 로드 실패")
-        _safe_notify_error("send", "email_sender 로드 실패")
-        return 1
+        if dry_run:
+            sender = os.getenv("EMAIL_SENDER", "(미설정)")
+            final = resolve_recipients(sender=sender if "@" in sender else None)
+            print(f"\n📬 DRY_RUN — 실제 발송 시 수신자 ({len(final)}명)")
+            for r in final:
+                print(f"  - {r}")
+            # HTML 미리보기 저장
+            preview_path = "/tmp/briefing_latest.html"
+            with open(preview_path, "w", encoding="utf-8") as f:
+                f.write(build_html_email(markdown, subject))
+            print(f"💾 HTML 프리뷰: {preview_path}")
+            _safe_notify_send(recipients=len(final), ok=True)
+            return 0
 
-    if dry_run:
-        sender = os.getenv("EMAIL_SENDER", "(미설정)")
-        final = resolve_recipients(sender=sender if "@" in sender else None)
-        print(f"\n📬 DRY_RUN — 실제 발송 시 수신자 ({len(final)}명)")
-        for r in final:
-            print(f"  - {r}")
-        # HTML 미리보기 저장
-        preview_path = "/tmp/briefing_latest.html"
-        with open(preview_path, "w", encoding="utf-8") as f:
-            f.write(build_html_email(markdown, subject))
-        print(f"💾 HTML 프리뷰: {preview_path}")
-        _safe_notify_send(recipients=len(final), ok=True)
+        try:
+            send_email(subject=subject, markdown_body=markdown)
+        except Exception:
+            logger.exception("이메일 발송 실패")
+            _safe_notify_error("send", f"발송 실패: {sys.exc_info()[1]}")
+            _send_failure_alert_email(
+                date,
+                f"메일 SMTP 발송 단계에서 예외 발생: {sys.exc_info()[1]}",
+            )
+            return 1
+
+        # 수신자 수 조회해서 KV 에 기록
+        try:
+            sender = os.getenv("EMAIL_SENDER")
+            recipients = resolve_recipients(sender=sender)
+            _safe_notify_send(recipients=len(recipients), ok=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("발송 상태 업로드 실패(무시): %s", exc)
+
+        print("\n✅ Stage 3 완료 (v2.9.2)")
         return 0
-
-    try:
-        send_email(subject=subject, markdown_body=markdown)
-    except Exception:
-        logger.exception("이메일 발송 실패")
-        _safe_notify_error("send", f"발송 실패: {sys.exc_info()[1]}")
-        return 1
-
-    # 수신자 수 조회해서 KV 에 기록
-    try:
-        sender = os.getenv("EMAIL_SENDER")
-        recipients = resolve_recipients(sender=sender)
-        _safe_notify_send(recipients=len(recipients), ok=True)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("발송 상태 업로드 실패(무시): %s", exc)
-
-    print("\n✅ Stage 3 완료")
-    return 0
+    finally:
+        # 락 해제 (예외 발생해도 반드시 해제)
+        if not dry_run:
+            _release_send_lock(date)
 
 
 # ═══════════════════════════════════════════════════════════════
