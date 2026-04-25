@@ -847,16 +847,20 @@ def _count_phrase_hits(text: str, phrases: tuple) -> Tuple[int, list]:
 
 
 def _is_item_output_valid(text: str) -> Tuple[bool, str]:
-    """v2.9.3: 10줄 귀납법 포맷 + 금지어 검증.
-    검증 기준:
+    """v2.9.4: 10줄 귀납법 포맷 검증 (금지어 체크는 _collect_forbidden_stats 로 분리).
+
+    v2.9.4 변경 (사용자 결정):
+      - 금지어·회피 표현으로 인한 카드 드랍 ❌ 폐기
+      - 검출은 _collect_forbidden_stats() 에서 별도 수행, 통계만 KV 에 기록
+      - v2.9.3 의 too_many_avoidance / forbidden_management_phrases 사유 제거
+
+    검증 기준 (포맷·필수 요소만):
       - 최소 글자수 (MIN_ITEM_CHARS = 450)
-      - 10개 이모지 라인(💰 📊 📉 📈 🔍 ⚡ 🏭 📅 🎯 📬) 중 최소 7개 이상 존재
-      - '시사점' 키워드 존재
-      - '수혜주' 또는 🎯 라인 내용 존재
-      - 출처/카테고리 라인 존재
-      - 숫자 최소 8개 이상 포함
-      - v2.9.3: 회피 표현은 2회까지만 허용 (3회 이상이면 정보부족 카드로 판정 → 드랍)
-      - v2.9.3: 경영/역사 금지어는 1회까지 허용 (2회 이상이면 재시도 → 드랍)
+      - 10개 이모지 라인 중 최소 7개 이상
+      - '시사점' 키워드, '수혜주' 또는 🎯 존재
+      - 출처/카테고리 메타 라인
+      - 숫자 최소 8개
+      - 문장 끊김 없음
     """
     if not text:
         return False, "empty"
@@ -893,28 +897,120 @@ def _is_item_output_valid(text: str) -> Tuple[bool, str]:
     if tail and tail[-1] not in _sentence_end:
         return False, "truncated_mid_sentence"
 
-    # v2.9.3: 회피 표현 빈도 (정보 부족 카드 자동 드랍 트리거)
-    avoid_hits, avoid_matched = _count_phrase_hits(text, _AVOIDANCE_PHRASES)
-    if avoid_hits >= 3:
-        return False, f"too_many_avoidance({avoid_hits}>=3, matched={avoid_matched})"
-
-    # v2.9.3: 경영/역사 금지어 검증 (재시도 트리거)
-    fb_hits, fb_matched = _count_phrase_hits(text, _FORBIDDEN_MGMT_PHRASES)
-    if fb_hits >= 2:
-        return False, f"forbidden_management_phrases({fb_hits}>=2, matched={fb_matched})"
-
+    # v2.9.4: 금지어/회피 표현은 더 이상 invalid 처리하지 않음 (통계만 별도 수집)
     return True, "ok"
+
+
+def _collect_forbidden_stats(text: str) -> Dict[str, Any]:
+    """v2.9.4: 단일 카드 텍스트에서 금지어/회피 표현 빈도를 수집 (검출만).
+
+    Returns
+    -------
+    {
+      "avoidance_hits": int,
+      "avoidance_matched": [phrase, ...],
+      "forbidden_hits": int,
+      "forbidden_matched": [phrase, ...],
+      "has_any": bool,           # 둘 중 하나라도 1회 이상 검출되면 True
+      "phrase_counts": {phrase: count, ...}  # 모든 매칭의 (표현→횟수) 맵
+    }
+    """
+    if not text:
+        return {
+            "avoidance_hits": 0, "avoidance_matched": [],
+            "forbidden_hits": 0, "forbidden_matched": [],
+            "has_any": False, "phrase_counts": {},
+        }
+    avoid_hits, avoid_matched = _count_phrase_hits(text, _AVOIDANCE_PHRASES)
+    fb_hits, fb_matched = _count_phrase_hits(text, _FORBIDDEN_MGMT_PHRASES)
+
+    counts: Dict[str, int] = {}
+    for p in _AVOIDANCE_PHRASES + _FORBIDDEN_MGMT_PHRASES:
+        c = text.count(p)
+        if c > 0:
+            counts[p] = c
+
+    return {
+        "avoidance_hits": avoid_hits,
+        "avoidance_matched": avoid_matched,
+        "forbidden_hits": fb_hits,
+        "forbidden_matched": fb_matched,
+        "has_any": (avoid_hits + fb_hits) > 0,
+        "phrase_counts": counts,
+    }
+
+
+def _record_forbidden_stats_to_kv(item_markdowns: List[str]) -> None:
+    """v2.9.4: 모든 카드를 합산해 금지어/회피 표현 통계를 KV 에 POST.
+
+    REPORT_ENDPOINT + REPORT_TOKEN 환경변수가 있을 때만 동작.
+    실패해도 파이프라인은 계속 진행 (best-effort).
+    """
+    if not item_markdowns:
+        return
+    endpoint = (os.getenv("REPORT_ENDPOINT") or "").rstrip("/")
+    token = os.getenv("REPORT_TOKEN") or ""
+    if not endpoint or not token:
+        logger.info("v2.9.4 금지어 통계: REPORT_ENDPOINT/TOKEN 미설정 — 스킵")
+        return
+
+    total_cards = len(item_markdowns)
+    cards_with_forbidden = 0
+    total_hits = 0
+    phrase_totals: Dict[str, int] = {}
+    for md in item_markdowns:
+        stats = _collect_forbidden_stats(md or "")
+        if stats["has_any"]:
+            cards_with_forbidden += 1
+        total_hits += stats["avoidance_hits"] + stats["forbidden_hits"]
+        for p, c in stats["phrase_counts"].items():
+            phrase_totals[p] = phrase_totals.get(p, 0) + c
+
+    top_phrases = sorted(
+        ({"phrase": p, "count": c} for p, c in phrase_totals.items()),
+        key=lambda x: x["count"], reverse=True,
+    )[:10]
+
+    payload = {
+        "date": _today_iso_str().replace("-", ""),  # YYYYMMDD
+        "totalCards": total_cards,
+        "cardsWithForbidden": cards_with_forbidden,
+        "totalHits": total_hits,
+        "topPhrases": top_phrases,
+    }
+
+    try:
+        import urllib.request
+        import json as _json
+        req = urllib.request.Request(
+            f"{endpoint}/api/public/pipeline/forbidden_stats",
+            data=_json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status == 200:
+                logger.info(
+                    "v2.9.4 금지어 통계 기록 OK — cards=%d, hits=%d, with=%d",
+                    total_cards, total_hits, cards_with_forbidden,
+                )
+            else:
+                logger.warning("v2.9.4 금지어 통계 응답 %d", resp.status)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("v2.9.4 금지어 통계 POST 실패: %s", exc)
 
 
 def summarize_one_item(client, item: Dict[str, Any]):
     """
     뉴스 1건을 상세 요약. 품질 미달 시 내부적으로 재시도.
 
-    v2.9.3 변경:
-      - 반환값이 str 또는 None.
-      - 회피 표현 과다(too_many_avoidance) 또는 금지어 과다(forbidden_management_phrases)
-        로 모든 시도가 실패하면 **None 반환** → 호출자가 카드를 드랍.
-      - 그 외 일반 실패는 기존처럼 best_text / fallback markdown 반환.
+    v2.9.4 변경 (사용자 결정):
+      - **None 반환 폐기** — 카드 드랍 정책 제거.
+      - 금지어/회피 표현 빈도는 통계로만 수집 (드랍하지 않음).
+      - 항상 str 반환: best_text 또는 _fallback_item_markdown.
     """
     rank = item["rank"]
     prompt = _build_item_prompt(item)
@@ -922,7 +1018,6 @@ def summarize_one_item(client, item: Dict[str, Any]):
     # 최대 3개 모델 × 각 2회 재시도 → 6회까지
     models_to_try = ("gemini-2.5-flash",) + GEMINI_FALLBACK_MODELS[:2]
     best_text = ""
-    last_drop_reason = ""  # v2.9.3: 드랍 트리거 사유 추적
 
     for m in models_to_try:
         for attempt in range(2):
@@ -941,9 +1036,6 @@ def summarize_one_item(client, item: Dict[str, Any]):
                     return text
                 logger.warning("Step 2) item %d 품질 미달(%s): %d자",
                                rank, reason, len(text or ""))
-                # v2.9.3: 드랍 사유 기록
-                if reason.startswith("too_many_avoidance") or reason.startswith("forbidden_management_phrases"):
-                    last_drop_reason = reason
                 if text and len(text) > len(best_text):
                     best_text = text
             except Exception as exc:  # noqa: BLE001
@@ -969,19 +1061,12 @@ def summarize_one_item(client, item: Dict[str, Any]):
                 return text
             logger.warning("Step 2) item %d OpenAI 품질 미달(%s): %d자",
                            rank, reason, len(text or ""))
-            if reason.startswith("too_many_avoidance") or reason.startswith("forbidden_management_phrases"):
-                last_drop_reason = reason
             if text and len(text) > len(best_text):
                 best_text = text
         except Exception as exc:  # noqa: BLE001
             logger.warning("Step 2) item %d OpenAI 호출 실패: %s", rank, exc)
 
-    # v2.9.3: 모든 시도가 회피/금지어로 실패 → 카드 드랍
-    if last_drop_reason:
-        logger.warning("Step 2) item %d 🚮 카드 드랍 (사유=%s)", rank, last_drop_reason)
-        return None
-
-    # 모든 시도 실패 — 원본 정보로 폴백 마크다운 생성
+    # 모든 시도 실패 — 원본 정보로 폴백 마크다운 생성 (v2.9.4: 항상 str 반환)
     logger.warning("Step 2) item %d 전체 실패 → 원본 폴백", rank)
     if best_text:
         return best_text  # 품질 미달이어도 응답이 있으면 사용
@@ -1466,24 +1551,20 @@ def summarize_with_gemini(
             if not ranked:
                 raise RuntimeError("랭킹 결과가 비어있음")
 
-            # Step 2) 병렬 개별 요약
+            # Step 2) 병렬 개별 요약 (v2.9.4: 모든 카드 str 보장 — None 필터 폐기)
             item_markdowns = summarize_all_items_parallel(
                 client, ranked, max_workers=4,
             )
+            # 안전망: 만약 None 이 섞여 있으면 폴백 마크다운으로 치환 (드랍하지 않음)
+            for i, md in enumerate(item_markdowns):
+                if md is None:
+                    item_markdowns[i] = _fallback_item_markdown(ranked[i])
 
-            # v2.9.3: 정보부족·금지어로 드랍된 카드(None) 필터링 + 동기화
-            paired = [
-                (it, md) for it, md in zip(ranked, item_markdowns)
-                if md is not None
-            ]
-            dropped = len(ranked) - len(paired)
-            if dropped:
-                logger.warning(
-                    "v2.9.3 🚮 정보부족/금지어로 %d건 드랍 → 잔존 %d건",
-                    dropped, len(paired),
-                )
-            ranked = [p[0] for p in paired]
-            item_markdowns = [p[1] for p in paired]
+            # v2.9.4: 금지어/회피 표현 통계 수집 (드랍하지 않고 통계만 KV 에 기록)
+            try:
+                _record_forbidden_stats_to_kv(item_markdowns)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("v2.9.4 금지어 통계 기록 실패(무시): %s", exc)
 
             # Step 3) 총평 + 조립
             overview = generate_overview(client, item_markdowns)

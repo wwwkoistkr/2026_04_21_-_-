@@ -763,6 +763,130 @@ app.get('/', (c) => {
         </div>
       </section>
 
+      {/* v2.9.4: 사용자 직접 점수 입력 + AI 자가점수 비교 + 7일 추이 + 금지어 통계 */}
+      <section class="bg-gradient-to-br from-amber-50 to-yellow-50 border-2 border-amber-200 rounded-2xl shadow p-4 sm:p-6 mb-6">
+        <div class="flex items-start gap-3 sm:gap-4 mb-4">
+          <div class="flex-shrink-0 text-3xl sm:text-4xl pt-1">📊</div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-base sm:text-lg font-bold text-gray-800">
+              오늘 받은 메일 품질 평가 <span class="text-xs font-normal text-gray-500">(v2.9.4)</span>
+            </h2>
+            <p class="text-xs sm:text-sm text-gray-600 mt-1">
+              0~100 점으로 직접 평가해 주세요. AI 자가점수와 비교해 1주일 후 시스템 개선 방향을 결정합니다.
+            </p>
+          </div>
+        </div>
+
+        {/* 입력 영역 */}
+        <div class="bg-white rounded-xl p-4 mb-4 border border-amber-200">
+          <div class="flex flex-col gap-3">
+            {/* 날짜 + 점수 슬라이더 */}
+            <div class="flex flex-col sm:flex-row gap-3 sm:items-center">
+              <label class="text-sm font-medium text-gray-700 sm:w-20">평가 날짜</label>
+              <input id="userScoreDate" type="date"
+                class="touch-target px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
+            </div>
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center justify-between">
+                <label class="text-sm font-medium text-gray-700">메일 품질 점수</label>
+                <div class="flex items-center gap-2">
+                  <input id="userScoreNumber" type="number" min="0" max="100" step="1" value="80"
+                    class="w-20 px-2 py-1 border border-gray-300 rounded text-center font-bold text-lg" />
+                  <span class="text-sm text-gray-500">/ 100</span>
+                </div>
+              </div>
+              <input id="userScoreSlider" type="range" min="0" max="100" step="1" value="80"
+                class="w-full h-2 bg-gradient-to-r from-red-300 via-yellow-300 to-green-400 rounded-lg appearance-none cursor-pointer" />
+              <div class="flex justify-between text-xs text-gray-500">
+                <span>0 (매우 나쁨)</span>
+                <span>50 (보통)</span>
+                <span>100 (완벽)</span>
+              </div>
+            </div>
+
+            {/* 약점 축 체크박스 (선택) */}
+            <div class="flex flex-col gap-1">
+              <span class="text-sm font-medium text-gray-700">약점 (선택, 복수 가능)</span>
+              <div class="flex flex-wrap gap-2">
+                <label class="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-full text-xs cursor-pointer hover:bg-gray-200">
+                  <input type="checkbox" class="user-score-axis" value="정확성" /> 정확성
+                </label>
+                <label class="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-full text-xs cursor-pointer hover:bg-gray-200">
+                  <input type="checkbox" class="user-score-axis" value="시의성" /> 시의성
+                </label>
+                <label class="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-full text-xs cursor-pointer hover:bg-gray-200">
+                  <input type="checkbox" class="user-score-axis" value="심층성" /> 심층성
+                </label>
+                <label class="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-full text-xs cursor-pointer hover:bg-gray-200">
+                  <input type="checkbox" class="user-score-axis" value="명료성" /> 명료성
+                </label>
+                <label class="flex items-center gap-1 px-2 py-1 bg-gray-100 rounded-full text-xs cursor-pointer hover:bg-gray-200">
+                  <input type="checkbox" class="user-score-axis" value="실행가능성" /> 실행가능성
+                </label>
+              </div>
+            </div>
+
+            {/* 코멘트 */}
+            <div class="flex flex-col gap-1">
+              <label class="text-sm font-medium text-gray-700">코멘트 <span class="text-xs text-gray-400">(선택, 500자 이내)</span></label>
+              <textarea id="userScoreComment" rows="2" maxLength="500"
+                placeholder="예: 미국 뉴스 7건 중 1건이 광고성, 한국 부분은 양호"
+                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm"></textarea>
+            </div>
+
+            <div class="flex gap-2 mt-2">
+              <button id="btnUserScoreSave"
+                class="touch-target flex-1 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-amber-600 hover:to-yellow-600 transition shadow-sm">
+                <i class="fa-solid fa-floppy-disk mr-1"></i> 점수 저장
+              </button>
+              <button id="btnUserScoreReload"
+                class="touch-target px-3 py-2.5 bg-white border border-amber-300 text-amber-700 font-medium rounded-lg hover:bg-amber-50 transition">
+                <i class="fa-solid fa-rotate"></i>
+              </button>
+            </div>
+            <div id="userScoreStatus" class="hidden text-sm p-2 rounded-lg"></div>
+          </div>
+        </div>
+
+        {/* AI 자가점수 vs 사용자 점수 비교 카드 + 7일 그래프 */}
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          <div class="bg-white rounded-xl p-3 border border-gray-200">
+            <div class="text-xs text-gray-500">오늘 사용자 점수</div>
+            <div id="todayUserScore" class="text-3xl font-bold text-amber-600">—</div>
+          </div>
+          <div class="bg-white rounded-xl p-3 border border-gray-200">
+            <div class="text-xs text-gray-500">오늘 AI 자가점수 (자가/전문가)</div>
+            <div id="todayAiScore" class="text-3xl font-bold text-blue-600">—</div>
+          </div>
+          <div class="bg-white rounded-xl p-3 border border-gray-200">
+            <div class="text-xs text-gray-500">7일 평균 차이 (AI − 사용자)</div>
+            <div id="scoreGap" class="text-3xl font-bold text-purple-600">—</div>
+            <div class="text-xs text-gray-400">+ 면 AI 가 후함, − 면 박함</div>
+          </div>
+        </div>
+
+        {/* 7일 추이 그래프 */}
+        <div class="bg-white rounded-xl p-3 border border-gray-200 mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold text-gray-700">📈 최근 7일 점수 추이</h3>
+            <span id="userScoreSummary" class="text-xs text-gray-500"></span>
+          </div>
+          <div style="position:relative;height:240px">
+            <canvas id="userScoreChart"></canvas>
+          </div>
+        </div>
+
+        {/* 금지어 통계 (중립 톤) */}
+        <details class="bg-white rounded-xl p-3 border border-gray-200">
+          <summary class="cursor-pointer text-sm font-semibold text-gray-700">
+            📊 분석 표현 사용 통계 <span class="text-xs font-normal text-gray-500">(7일 누적, 참고용)</span>
+          </summary>
+          <div id="forbiddenStatsBody" class="mt-3 text-xs text-gray-700">
+            <div class="text-gray-400">로딩 중…</div>
+          </div>
+        </details>
+      </section>
+
       {/* ① 이메일 수신자 관리 */}
       <section class="bg-white rounded-2xl shadow p-4 sm:p-6 mb-6">
         <h2 class="text-base sm:text-lg font-bold text-gray-800 mb-4">
@@ -976,7 +1100,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="toast-hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js?v=2.2.7"></script>
+      <script src="/static/admin.js?v=2.9.4"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )
@@ -1521,6 +1645,17 @@ const KV_KEY_PIPELINE_LOCK_PFX = 'pipeline:lock:'        // pipeline:lock:YYYYMM
 const KV_KEY_PIPELINE_RETRY_PFX = 'pipeline:retry:'      // pipeline:retry:YYYYMMDD
 const PIPELINE_LOCK_TTL_DEFAULT = 300  // 5분 (락 자동 만료)
 
+// ───────────────────────────────────────────────────────────────────────
+// v2.9.4 (2026-04-25): 사용자 점수 입력 + 금지어 통계 KV prefix
+// 목적:
+//   1) 사용자가 매일 메일 품질을 0~100점으로 직접 평가 → AI 자가점수와 비교
+//   2) AI 가 사용한 금지어 표현 빈도를 통계로만 기록 (드랍하지 않음)
+// 보관 기간: 90일 (분석 + 추이 그래프용)
+// ───────────────────────────────────────────────────────────────────────
+const KV_KEY_USER_SCORE_PFX     = 'user_score:'          // user_score:YYYYMMDD
+const KV_KEY_FORBIDDEN_STATS_PFX = 'forbidden_stats:'    // forbidden_stats:YYYYMMDD
+const USER_SCORE_TTL_SEC        = 86400 * 90  // 90일 보관
+
 /**
  * v2.9.2: 발송 락 상태 조회 (점유 중인지 확인).
  * GET /api/public/pipeline/lock?date=YYYYMMDD
@@ -1625,6 +1760,295 @@ app.post('/api/public/pipeline/retry_stats', async (c) => {
   } catch (e: any) {
     return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
   }
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// v2.9.4 (2026-04-25): 사용자 점수 입력 시스템
+// ─────────────────────────────────────────────────────────────────────
+// 목적: AI 자가평가의 편향(self-preference bias)을 보완하기 위해
+//       사용자가 매일 받은 메일을 직접 0~100점으로 평가하고
+//       1주일 추이 + AI 자가점수와의 비교를 대시보드에서 확인.
+// ═══════════════════════════════════════════════════════════════════════
+
+interface UserScore {
+  date: string                  // YYYYMMDD
+  score: number                 // 0~100
+  comment?: string              // 자유 코멘트 (선택)
+  weakAxes?: string[]           // 약점 축 체크박스 (정확성/시의성/심층성/명료성/실행가능성)
+  aiScoreSelf?: number          // AI 자가점수 (있으면 비교용)
+  aiScoreExpert?: number        // AI 전문가 점수 (있으면 비교용)
+  recordedAt: number
+  updatedAt?: number
+}
+
+/**
+ * v2.9.4: 사용자 점수 등록/수정 (관리자 보호).
+ * POST /api/admin/user-score
+ *   body: { date?: YYYYMMDD, score: 0~100, comment?, weakAxes?: string[] }
+ * 같은 날짜 재호출 시 덮어쓰기 (수정).
+ */
+app.post('/api/admin/user-score', async (c) => {
+  try {
+    const body = await c.req.json() as {
+      date?: string
+      score?: number
+      comment?: string
+      weakAxes?: string[]
+    }
+    const date = (body.date && /^\d{8}$/.test(body.date)) ? body.date : kstDateKey()
+    // 점수: 0~100 hard clamp (사용자 요청)
+    const rawScore = Number(body.score)
+    if (!Number.isFinite(rawScore)) {
+      return c.json({ ok: false, error: '점수가 유효한 숫자여야 합니다.' }, 400)
+    }
+    const score = Math.max(0, Math.min(100, Math.round(rawScore)))
+    const comment = String(body.comment || '').slice(0, 500)
+    const weakAxes = Array.isArray(body.weakAxes)
+      ? body.weakAxes.filter(x => typeof x === 'string').slice(0, 5)
+      : []
+
+    // 같은 날짜 기존 점수 조회 (수정인지 신규인지 판단)
+    const key = KV_KEY_USER_SCORE_PFX + date
+    const existingRaw = await c.env.SOURCES_KV.get(key)
+    let existing: UserScore | null = null
+    try { existing = existingRaw ? JSON.parse(existingRaw) as UserScore : null } catch {}
+
+    // 같은 날 AI 자가점수가 있으면 함께 저장 (비교용)
+    // pipeline:summary:YYYYMMDD 에 BRIEFING_SCORE 주석이 들어있을 수 있음
+    let aiScoreSelf: number | undefined
+    let aiScoreExpert: number | undefined
+    try {
+      const summary = await c.env.SOURCES_KV.get(KV_KEY_PIPELINE_SUMMARY_PFX + date)
+      if (summary) {
+        const m = /<!--\s*BRIEFING_SCORE:\s*self=(\d+)\s+expert=(\d+)/.exec(summary)
+        if (m) {
+          aiScoreSelf = Number(m[1])
+          aiScoreExpert = Number(m[2])
+        }
+      }
+    } catch {}
+
+    const now = Date.now()
+    const record: UserScore = {
+      date,
+      score,
+      comment: comment || undefined,
+      weakAxes: weakAxes.length ? weakAxes : undefined,
+      aiScoreSelf: aiScoreSelf ?? existing?.aiScoreSelf,
+      aiScoreExpert: aiScoreExpert ?? existing?.aiScoreExpert,
+      recordedAt: existing?.recordedAt ?? now,
+      updatedAt: existing ? now : undefined,
+    }
+
+    await c.env.SOURCES_KV.put(key, JSON.stringify(record),
+      { expirationTtl: USER_SCORE_TTL_SEC })
+
+    return c.json({ ok: true, record, isUpdate: !!existing })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/**
+ * v2.9.4: 단일 날짜 점수 조회 (관리자).
+ * GET /api/admin/user-score?date=YYYYMMDD
+ */
+app.get('/api/admin/user-score', async (c) => {
+  const date = (c.req.query('date') || '').match(/^\d{8}$/)
+    ? c.req.query('date')! : kstDateKey()
+  const raw = await c.env.SOURCES_KV.get(KV_KEY_USER_SCORE_PFX + date)
+  if (!raw) return c.json({ ok: true, exists: false, date })
+  try {
+    const record = JSON.parse(raw) as UserScore
+    return c.json({ ok: true, exists: true, record })
+  } catch {
+    return c.json({ ok: false, error: 'KV 파싱 실패' }, 500)
+  }
+})
+
+/**
+ * v2.9.4: 최근 N일 점수 추이 조회 (대시보드 그래프용).
+ * GET /api/admin/user-scores/recent?days=7  (기본 7, 최대 30)
+ * 응답:
+ *   { ok, days, items: [{ date, score, aiScoreSelf, aiScoreExpert, comment, weakAxes }] }
+ *   날짜는 오래된 → 최신 순 (그래프 X축에 그대로 그릴 수 있음).
+ */
+app.get('/api/admin/user-scores/recent', async (c) => {
+  const days = Math.max(1, Math.min(30, Number(c.req.query('days') || 7)))
+  const today = kstDateKey()  // YYYYMMDD
+
+  // 오늘부터 거꾸로 N일치 KV 키 조회
+  const dates: string[] = []
+  // YYYYMMDD → Date 변환
+  const y = Number(today.slice(0, 4))
+  const m = Number(today.slice(4, 6)) - 1
+  const d = Number(today.slice(6, 8))
+  const todayDate = new Date(Date.UTC(y, m, d))
+  for (let i = days - 1; i >= 0; i--) {
+    const dt = new Date(todayDate.getTime() - i * 86400_000)
+    const ymd = dt.getUTCFullYear().toString().padStart(4, '0')
+      + (dt.getUTCMonth() + 1).toString().padStart(2, '0')
+      + dt.getUTCDate().toString().padStart(2, '0')
+    dates.push(ymd)
+  }
+
+  const items = await Promise.all(dates.map(async (date) => {
+    const raw = await c.env.SOURCES_KV.get(KV_KEY_USER_SCORE_PFX + date)
+    if (!raw) {
+      // 점수 미입력 → AI 자가점수만이라도 같이 노출
+      try {
+        const summary = await c.env.SOURCES_KV.get(KV_KEY_PIPELINE_SUMMARY_PFX + date)
+        if (summary) {
+          const mm = /<!--\s*BRIEFING_SCORE:\s*self=(\d+)\s+expert=(\d+)/.exec(summary)
+          if (mm) {
+            return {
+              date, score: null,
+              aiScoreSelf: Number(mm[1]),
+              aiScoreExpert: Number(mm[2]),
+            }
+          }
+        }
+      } catch {}
+      return { date, score: null }
+    }
+    try {
+      const r = JSON.parse(raw) as UserScore
+      return {
+        date,
+        score: r.score,
+        aiScoreSelf: r.aiScoreSelf,
+        aiScoreExpert: r.aiScoreExpert,
+        comment: r.comment,
+        weakAxes: r.weakAxes,
+      }
+    } catch {
+      return { date, score: null }
+    }
+  }))
+
+  // 통계 요약 (입력된 점수만)
+  const scored = items.filter(x => x.score !== null && typeof x.score === 'number') as Array<{ score: number; aiScoreSelf?: number }>
+  const avg = scored.length ? Math.round(scored.reduce((a, b) => a + b.score, 0) / scored.length) : null
+  const aiAvg = (() => {
+    const ai = scored.filter(x => typeof x.aiScoreSelf === 'number') as Array<{ aiScoreSelf: number }>
+    return ai.length ? Math.round(ai.reduce((a, b) => a + b.aiScoreSelf, 0) / ai.length) : null
+  })()
+  const min = scored.length ? Math.min(...scored.map(x => x.score)) : null
+  const max = scored.length ? Math.max(...scored.map(x => x.score)) : null
+
+  return c.json({
+    ok: true,
+    days,
+    items,
+    summary: {
+      count: scored.length,
+      userAvg: avg,
+      aiAvg,
+      gap: (avg !== null && aiAvg !== null) ? aiAvg - avg : null,  // AI 가 얼마나 후한지
+      min, max,
+    },
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// v2.9.4 (2026-04-25): 금지어 통계 (드랍 안 함, 통계만 기록)
+// ─────────────────────────────────────────────────────────────────────
+// Python 측 _is_item_output_valid 가 검출 후 카드는 살리고 통계만 POST.
+// ═══════════════════════════════════════════════════════════════════════
+
+interface ForbiddenStat {
+  date: string
+  totalCards: number          // 그날 생성된 카드 수
+  cardsWithForbidden: number  // 금지어 1회 이상 포함 카드 수
+  totalHits: number           // 총 금지어 등장 횟수 (모든 카드 합산)
+  topPhrases: Array<{ phrase: string; count: number }>  // 빈도 상위 10
+  recordedAt: number
+}
+
+/**
+ * v2.9.4: 금지어 통계 기록 (Python 에서 호출).
+ * POST /api/public/pipeline/forbidden_stats
+ *   body: { date?, totalCards, cardsWithForbidden, totalHits,
+ *           topPhrases?: [{phrase, count}] }
+ */
+app.post('/api/public/pipeline/forbidden_stats', async (c) => {
+  const auth = checkReportToken(c)
+  if (!auth.ok) return c.json({ ok: false, error: `인증 실패: ${auth.reason}` }, 401)
+
+  try {
+    const body = await c.req.json() as {
+      date?: string
+      totalCards?: number
+      cardsWithForbidden?: number
+      totalHits?: number
+      topPhrases?: Array<{ phrase: string; count: number }>
+    }
+    const date = (body.date && /^\d{8}$/.test(body.date)) ? body.date : kstDateKey()
+    const stat: ForbiddenStat = {
+      date,
+      totalCards: Math.max(0, Math.min(50, body.totalCards ?? 0)),
+      cardsWithForbidden: Math.max(0, Math.min(50, body.cardsWithForbidden ?? 0)),
+      totalHits: Math.max(0, Math.min(500, body.totalHits ?? 0)),
+      topPhrases: Array.isArray(body.topPhrases)
+        ? body.topPhrases
+            .filter(x => x && typeof x.phrase === 'string')
+            .slice(0, 10)
+            .map(x => ({ phrase: String(x.phrase).slice(0, 50), count: Number(x.count) || 0 }))
+        : [],
+      recordedAt: Date.now(),
+    }
+    await c.env.SOURCES_KV.put(
+      KV_KEY_FORBIDDEN_STATS_PFX + date,
+      JSON.stringify(stat),
+      { expirationTtl: USER_SCORE_TTL_SEC }
+    )
+    return c.json({ ok: true, ...stat })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e) }, 500)
+  }
+})
+
+/**
+ * v2.9.4: 금지어 통계 조회 (관리자 대시보드).
+ * GET /api/admin/forbidden-stats/recent?days=7
+ */
+app.get('/api/admin/forbidden-stats/recent', async (c) => {
+  const days = Math.max(1, Math.min(30, Number(c.req.query('days') || 7)))
+  const today = kstDateKey()
+  const y = Number(today.slice(0, 4))
+  const m = Number(today.slice(4, 6)) - 1
+  const d = Number(today.slice(6, 8))
+  const todayDate = new Date(Date.UTC(y, m, d))
+
+  const dates: string[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const dt = new Date(todayDate.getTime() - i * 86400_000)
+    const ymd = dt.getUTCFullYear().toString().padStart(4, '0')
+      + (dt.getUTCMonth() + 1).toString().padStart(2, '0')
+      + dt.getUTCDate().toString().padStart(2, '0')
+    dates.push(ymd)
+  }
+
+  const items = await Promise.all(dates.map(async (date) => {
+    const raw = await c.env.SOURCES_KV.get(KV_KEY_FORBIDDEN_STATS_PFX + date)
+    if (!raw) return { date, totalCards: 0, cardsWithForbidden: 0, totalHits: 0, topPhrases: [] as Array<{phrase:string;count:number}> }
+    try { return JSON.parse(raw) as ForbiddenStat }
+    catch { return { date, totalCards: 0, cardsWithForbidden: 0, totalHits: 0, topPhrases: [] as Array<{phrase:string;count:number}> } }
+  }))
+
+  // 전체 빈도 상위 합산
+  const phraseTotals = new Map<string, number>()
+  for (const it of items) {
+    for (const p of (it.topPhrases || [])) {
+      phraseTotals.set(p.phrase, (phraseTotals.get(p.phrase) || 0) + p.count)
+    }
+  }
+  const topOverall = Array.from(phraseTotals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([phrase, count]) => ({ phrase, count }))
+
+  return c.json({ ok: true, days, items, topOverall })
 })
 
 /**

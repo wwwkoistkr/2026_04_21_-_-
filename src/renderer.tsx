@@ -73,7 +73,9 @@ export const renderer = jsxRenderer(({ children, title }: any) => {
           href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css"
           rel="stylesheet"
         />
-        <link href="/static/style.css?v=2.3.2" rel="stylesheet" />
+        {/* v2.9.4: 사용자 점수 추이 그래프용 Chart.js */}
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+        <link href="/static/style.css?v=2.9.4" rel="stylesheet" />
 
         {/* Tailwind 설정: 고해상도 디스플레이 대응 breakpoints */}
         <script

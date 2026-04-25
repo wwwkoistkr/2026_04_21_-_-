@@ -2599,9 +2599,285 @@
   }
 
   // ═════════════════════════════════════════════════════════════
+  // v2.9.4 (2026-04-25): 사용자 점수 입력 + 7일 추이 + 금지어 통계
+  // ─────────────────────────────────────────────────────────────
+  let userScoreChart = null
+
+  // 오늘 KST 날짜 (YYYY-MM-DD)
+  function todayKstISO() {
+    const d = new Date(Date.now() + 9 * 3600 * 1000)
+    return d.toISOString().slice(0, 10)
+  }
+  // YYYYMMDD ↔ YYYY-MM-DD 변환
+  function ymdCompact(iso) { return iso.replaceAll('-', '') }
+  function ymdDashed(compact) {
+    return `${compact.slice(0,4)}-${compact.slice(4,6)}-${compact.slice(6,8)}`
+  }
+
+  function setUserScoreStatus(msg, type) {
+    const el = document.getElementById('userScoreStatus')
+    if (!el) return
+    el.classList.remove('hidden', 'bg-green-50', 'text-green-800', 'bg-red-50', 'text-red-800', 'bg-blue-50', 'text-blue-800')
+    if (type === 'ok')   el.classList.add('bg-green-50', 'text-green-800')
+    else if (type === 'err')  el.classList.add('bg-red-50', 'text-red-800')
+    else el.classList.add('bg-blue-50', 'text-blue-800')
+    el.textContent = msg
+  }
+
+  function setupUserScoreForm() {
+    const dateEl = document.getElementById('userScoreDate')
+    const slider = document.getElementById('userScoreSlider')
+    const numEl  = document.getElementById('userScoreNumber')
+    const btnSave = document.getElementById('btnUserScoreSave')
+    const btnReload = document.getElementById('btnUserScoreReload')
+    if (!dateEl || !slider || !numEl) return
+
+    // 기본값: 오늘
+    dateEl.value = todayKstISO()
+
+    // 슬라이더 ↔ 숫자 입력 양방향 바인딩 + 0~100 클램프
+    function clamp(v) {
+      const n = Math.round(Number(v))
+      if (!Number.isFinite(n)) return 0
+      return Math.max(0, Math.min(100, n))
+    }
+    slider.addEventListener('input', () => { numEl.value = slider.value })
+    numEl.addEventListener('input', () => {
+      const v = clamp(numEl.value)
+      slider.value = v
+      // 사용자가 직접 입력 중에는 강제 클램프하지 않고 blur 시점에만
+    })
+    numEl.addEventListener('blur', () => {
+      const v = clamp(numEl.value)
+      numEl.value = v
+      slider.value = v
+    })
+
+    // 날짜 변경 시 기존 점수 자동 로드
+    dateEl.addEventListener('change', loadExistingScore)
+
+    btnSave.addEventListener('click', async () => {
+      const score = clamp(numEl.value)
+      const comment = (document.getElementById('userScoreComment').value || '').slice(0, 500)
+      const weakAxes = Array.from(document.querySelectorAll('.user-score-axis:checked'))
+        .map(cb => cb.value)
+      const date = ymdCompact(dateEl.value || todayKstISO())
+
+      btnSave.disabled = true
+      setUserScoreStatus('저장 중…', 'info')
+      try {
+        const res = await fetch('/api/admin/user-score', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ date, score, comment, weakAxes }),
+        })
+        const j = await res.json()
+        if (!res.ok || !j.ok) throw new Error(j.error || '저장 실패')
+        setUserScoreStatus(
+          `✅ 저장 완료 (${j.isUpdate ? '수정' : '신규'}) — ${score}점`, 'ok'
+        )
+        await loadUserScoreTrend()
+      } catch (e) {
+        setUserScoreStatus('❌ ' + (e.message || e), 'err')
+      } finally {
+        btnSave.disabled = false
+      }
+    })
+
+    btnReload.addEventListener('click', () => {
+      loadExistingScore()
+      loadUserScoreTrend()
+    })
+  }
+
+  async function loadExistingScore() {
+    const dateEl = document.getElementById('userScoreDate')
+    if (!dateEl) return
+    const date = ymdCompact(dateEl.value || todayKstISO())
+    try {
+      const res = await fetch(`/api/admin/user-score?date=${date}`, { credentials: 'same-origin' })
+      const j = await res.json()
+      if (!j.ok) return
+      // 기본값으로 채워넣기
+      const slider = document.getElementById('userScoreSlider')
+      const numEl  = document.getElementById('userScoreNumber')
+      const commEl = document.getElementById('userScoreComment')
+      if (j.exists && j.record) {
+        slider.value = j.record.score
+        numEl.value = j.record.score
+        commEl.value = j.record.comment || ''
+        document.querySelectorAll('.user-score-axis').forEach(cb => {
+          cb.checked = (j.record.weakAxes || []).includes(cb.value)
+        })
+        setUserScoreStatus(`기존 점수 ${j.record.score}점 로드 (수정 후 다시 저장하세요)`, 'info')
+      } else {
+        slider.value = 80
+        numEl.value = 80
+        commEl.value = ''
+        document.querySelectorAll('.user-score-axis').forEach(cb => cb.checked = false)
+        const el = document.getElementById('userScoreStatus')
+        if (el) el.classList.add('hidden')
+      }
+    } catch (e) {
+      console.warn('[user-score] 기존 점수 로드 실패:', e)
+    }
+  }
+
+  async function loadUserScoreTrend() {
+    const elToday = document.getElementById('todayUserScore')
+    const elAi    = document.getElementById('todayAiScore')
+    const elGap   = document.getElementById('scoreGap')
+    const elSum   = document.getElementById('userScoreSummary')
+    if (!elToday) return
+    try {
+      const res = await fetch('/api/admin/user-scores/recent?days=7', { credentials: 'same-origin' })
+      const j = await res.json()
+      if (!j.ok) throw new Error(j.error || 'failed')
+
+      // 카드 갱신 — 마지막(=오늘) 항목
+      const today = j.items[j.items.length - 1] || {}
+      elToday.textContent = (today.score === null || today.score === undefined) ? '미입력' : (today.score + '점')
+      if (today.aiScoreSelf !== undefined && today.aiScoreExpert !== undefined) {
+        elAi.textContent = `${today.aiScoreSelf}/${today.aiScoreExpert}`
+      } else {
+        elAi.textContent = '—'
+      }
+
+      // 7일 평균 갭
+      if (j.summary && j.summary.gap !== null && j.summary.gap !== undefined) {
+        const g = j.summary.gap
+        elGap.textContent = (g >= 0 ? '+' : '') + g + '점'
+        elGap.classList.remove('text-purple-600', 'text-red-600', 'text-green-600')
+        if (g > 5) elGap.classList.add('text-red-600')
+        else if (g < -5) elGap.classList.add('text-green-600')
+        else elGap.classList.add('text-purple-600')
+      } else {
+        elGap.textContent = '—'
+      }
+
+      // 통계 라인
+      if (elSum && j.summary) {
+        const s = j.summary
+        if (s.count > 0) {
+          elSum.textContent = `${s.count}일 평균 ${s.userAvg}점 (최저 ${s.min} · 최고 ${s.max})`
+        } else {
+          elSum.textContent = '아직 기록 없음'
+        }
+      }
+
+      // Chart.js 그래프
+      renderUserScoreChart(j.items)
+    } catch (e) {
+      console.warn('[user-score] 추이 로드 실패:', e)
+      elToday.textContent = '오류'
+    }
+  }
+
+  function renderUserScoreChart(items) {
+    const canvas = document.getElementById('userScoreChart')
+    if (!canvas || typeof Chart === 'undefined') return
+    const labels = items.map(x => `${x.date.slice(4,6)}/${x.date.slice(6,8)}`)
+    const userData = items.map(x => (x.score === null || x.score === undefined) ? null : x.score)
+    const aiData = items.map(x => (x.aiScoreSelf === undefined || x.aiScoreSelf === null) ? null : x.aiScoreSelf)
+
+    const config = {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: '사용자 점수',
+            data: userData,
+            borderColor: '#f59e0b',
+            backgroundColor: 'rgba(245,158,11,0.15)',
+            borderWidth: 3,
+            tension: 0.3,
+            spanGaps: true,
+            pointRadius: 5,
+            pointBackgroundColor: '#f59e0b',
+          },
+          {
+            label: 'AI 자가점수',
+            data: aiData,
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59,130,246,0.1)',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            tension: 0.3,
+            spanGaps: true,
+            pointRadius: 4,
+            pointBackgroundColor: '#3b82f6',
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { min: 0, max: 100, ticks: { stepSize: 20 } },
+        },
+        plugins: {
+          legend: { position: 'top', labels: { font: { size: 11 } } },
+          tooltip: { mode: 'index', intersect: false },
+        },
+      },
+    }
+    if (userScoreChart) {
+      userScoreChart.data = config.data
+      userScoreChart.update('none')
+    } else {
+      userScoreChart = new Chart(canvas, config)
+    }
+  }
+
+  async function loadForbiddenStats() {
+    const body = document.getElementById('forbiddenStatsBody')
+    if (!body) return
+    try {
+      const res = await fetch('/api/admin/forbidden-stats/recent?days=7', { credentials: 'same-origin' })
+      const j = await res.json()
+      if (!j.ok) throw new Error(j.error || 'failed')
+
+      const totalCards = j.items.reduce((a, b) => a + (b.totalCards || 0), 0)
+      const totalHits  = j.items.reduce((a, b) => a + (b.totalHits || 0), 0)
+      const cardsWith  = j.items.reduce((a, b) => a + (b.cardsWithForbidden || 0), 0)
+
+      let html = ''
+      html += `<div class="grid grid-cols-3 gap-2 mb-3">`
+      html += `<div class="bg-gray-50 rounded p-2"><div class="text-gray-500">총 카드 수</div><div class="font-bold text-base">${totalCards}</div></div>`
+      html += `<div class="bg-gray-50 rounded p-2"><div class="text-gray-500">표현 검출 횟수</div><div class="font-bold text-base">${totalHits}</div></div>`
+      html += `<div class="bg-gray-50 rounded p-2"><div class="text-gray-500">검출 카드 비율</div><div class="font-bold text-base">${totalCards ? Math.round(cardsWith*100/totalCards) : 0}%</div></div>`
+      html += `</div>`
+
+      if (j.topOverall && j.topOverall.length > 0) {
+        html += `<div class="font-medium text-gray-700 mb-1">자주 등장한 표현 Top ${j.topOverall.length}</div>`
+        html += `<ul class="space-y-1">`
+        for (const p of j.topOverall) {
+          html += `<li class="flex justify-between border-b border-gray-100 py-0.5"><span>${p.phrase}</span><span class="text-gray-500">${p.count}회</span></li>`
+        }
+        html += `</ul>`
+      } else {
+        html += `<div class="text-gray-400">아직 통계가 쌓이지 않았습니다.</div>`
+      }
+      html += `<div class="mt-2 text-gray-400">※ 이 통계는 카드 드랍 없이 기록만 합니다 (v2.9.4).</div>`
+      body.innerHTML = html
+    } catch (e) {
+      body.innerHTML = `<div class="text-red-500">로드 실패: ${e.message || e}</div>`
+    }
+  }
+
+  function setupUserScoreSection() {
+    setupUserScoreForm()
+    loadExistingScore()
+    loadUserScoreTrend()
+    loadForbiddenStats()
+  }
+
+  // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.5.2 초기화 중…')
+  console.log('[MorningStock] Admin v2.9.4 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
@@ -2609,10 +2885,11 @@
   setupRecipientBulkHandlers()
   setupDashboard()  // v2.4.0: 수집 대시보드
   setupPipelineCard()  // v2.6.0: 3단계 파이프라인 상태 카드
+  setupUserScoreSection()  // v2.9.4: 사용자 점수 입력 + 추이 + 금지어 통계
   loadPresets().then(() => reload())
   reloadRecipients()
   checkTriggerConfig()
   startSyncPolling()
   updateAddButtonState()  // v2.5.2: 초기 탭(all)에 맞춰 버튼 상태 설정
-  console.log('[MorningStock] v2.5.2 초기화 완료 (카테고리 저장 버그 수정 + 유튜브 제거).')
+  console.log('[MorningStock] v2.9.4 초기화 완료 (사용자 점수 입력 + 금지어 통계).')
 })()
