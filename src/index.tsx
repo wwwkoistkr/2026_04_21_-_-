@@ -769,7 +769,7 @@ app.get('/', (c) => {
           <div class="flex-shrink-0 text-3xl sm:text-4xl pt-1">📊</div>
           <div class="flex-1 min-w-0">
             <h2 class="text-base sm:text-lg font-bold text-gray-800">
-              오늘 받은 메일 품질 평가 <span class="text-xs font-normal text-gray-500">(v2.9.4)</span>
+              오늘 받은 메일 품질 평가 <span class="text-xs font-normal text-gray-500">(v2.9.5)</span>
             </h2>
             <p class="text-xs sm:text-sm text-gray-600 mt-1">
               0~100 점으로 직접 평가해 주세요. AI 자가점수와 비교해 1주일 후 시스템 개선 방향을 결정합니다.
@@ -862,6 +862,21 @@ app.get('/', (c) => {
             <div class="text-xs text-gray-500">7일 평균 차이 (AI − 사용자)</div>
             <div id="scoreGap" class="text-3xl font-bold text-purple-600">—</div>
             <div class="text-xs text-gray-400">+ 면 AI 가 후함, − 면 박함</div>
+          </div>
+        </div>
+
+        {/* v2.9.5: 현재 적용 중인 강화 지침 패널 */}
+        <div id="reinforcePanel" class="hidden bg-gradient-to-r from-rose-50 to-pink-50 rounded-xl p-3 border border-rose-200 mb-4">
+          <div class="flex items-start gap-2">
+            <i class="fa-solid fa-gears text-rose-500 mt-0.5"></i>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-semibold text-rose-700">
+                🔁 내일 Stage 2 에 적용될 강화 지침 <span class="text-xs font-normal text-rose-500">(v2.9.5)</span>
+              </div>
+              <div id="reinforceDetail" class="text-xs text-rose-600 mt-1 leading-relaxed">
+                {/* JS 가 채움 */}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1100,7 +1115,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="toast-hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js?v=2.9.4"></script>
+      <script src="/static/admin.js?v=2.9.5"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )
@@ -1655,6 +1670,87 @@ const PIPELINE_LOCK_TTL_DEFAULT = 300  // 5분 (락 자동 만료)
 const KV_KEY_USER_SCORE_PFX     = 'user_score:'          // user_score:YYYYMMDD
 const KV_KEY_FORBIDDEN_STATS_PFX = 'forbidden_stats:'    // forbidden_stats:YYYYMMDD
 const USER_SCORE_TTL_SEC        = 86400 * 90  // 90일 보관
+
+/**
+ * v2.9.5: Stage 2 가 호출할 사용자 피드백 신호 조회 (public, BRIEFING_READ_TOKEN).
+ * GET /api/public/feedback/signal?days=7
+ * 응답:
+ *   {
+ *     ok, days, samples,             // 점수가 입력된 일수
+ *     avgScore,                       // 최근 N일 평균 점수 (samples 가 0 이면 null)
+ *     weakAxesTop: ["정확성", ...],   // 가장 빈번한 약점 (최대 3개, 빈도 내림차순)
+ *     weakAxesCounts: { "정확성": 5, "심층성": 3 },
+ *     reinforce: boolean              // avgScore < 80 이고 samples >= 2 일 때 true
+ *                                     // → Stage 2 가 프롬프트에 강화 지침 주입할지 결정
+ *   }
+ * 인증 실패 시 401, 데이터 없음(샘플 0개)도 200 으로 정상 응답 (reinforce=false).
+ */
+app.get('/api/public/feedback/signal', async (c) => {
+  const expected = c.env.BRIEFING_READ_TOKEN
+  const auth = c.req.header('authorization') || ''
+  const m = auth.match(/^Bearer\s+(.+)$/i)
+  if (!expected || !m || m[1] !== expected) {
+    return c.json({ ok: false, error: '인증 실패 (Bearer BRIEFING_READ_TOKEN 필요)' }, 401)
+  }
+
+  const days = Math.max(1, Math.min(30, Number(c.req.query('days') || 7)))
+  const today = kstDateKey()
+  const y = Number(today.slice(0, 4))
+  const mo = Number(today.slice(4, 6)) - 1
+  const d = Number(today.slice(6, 8))
+  const todayDate = new Date(Date.UTC(y, mo, d))
+
+  // 어제부터 거꾸로 N일 (오늘은 아직 입력 전이므로 제외)
+  const dates: string[] = []
+  for (let i = 1; i <= days; i++) {
+    const dt = new Date(todayDate.getTime() - i * 86400_000)
+    const ymd = dt.getUTCFullYear().toString().padStart(4, '0')
+      + (dt.getUTCMonth() + 1).toString().padStart(2, '0')
+      + dt.getUTCDate().toString().padStart(2, '0')
+    dates.push(ymd)
+  }
+
+  const records: Array<{ score: number; weakAxes?: string[] }> = []
+  await Promise.all(dates.map(async (date) => {
+    const raw = await c.env.SOURCES_KV.get(KV_KEY_USER_SCORE_PFX + date)
+    if (!raw) return
+    try {
+      const r = JSON.parse(raw) as UserScore
+      if (typeof r.score === 'number') {
+        records.push({ score: r.score, weakAxes: r.weakAxes })
+      }
+    } catch {}
+  }))
+
+  const samples = records.length
+  let avgScore: number | null = null
+  const weakAxesCounts: Record<string, number> = {}
+  if (samples > 0) {
+    avgScore = Math.round(records.reduce((s, r) => s + r.score, 0) / samples)
+    for (const r of records) {
+      for (const ax of r.weakAxes || []) {
+        weakAxesCounts[ax] = (weakAxesCounts[ax] || 0) + 1
+      }
+    }
+  }
+  const weakAxesTop = Object.entries(weakAxesCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([k]) => k)
+
+  // 강화 지침 주입 조건: 평균 점수 80 미만 + 샘플 2개 이상 (1개는 통계적 의미 부족)
+  const reinforce = !!(avgScore !== null && avgScore < 80 && samples >= 2)
+
+  return c.json({
+    ok: true,
+    days,
+    samples,
+    avgScore,
+    weakAxesTop,
+    weakAxesCounts,
+    reinforce,
+  })
+})
 
 /**
  * v2.9.2: 발송 락 상태 조회 (점유 중인지 확인).

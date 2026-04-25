@@ -149,7 +149,7 @@ MAX_OUTPUT_TOKENS = 8192        # Gemini 2.5 Flash의 max
 TARGET_NEWS_COUNT = 15          # v2.9.0: 10→15 최종 출력 뉴스 개수
 
 # 개별 뉴스 요약 기준
-MIN_ITEM_CHARS = 450            # v2.9.0: 300→450 (10줄 귀납법, +검색어매칭·파급효과·일정)
+MIN_ITEM_CHARS = 600            # v2.9.5: 450→600 (3태그 서술형: 9~12문장 자연스러운 흐름)
 ITEM_MAX_OUTPUT_TOKENS = 2048   # v2.9.0: 1536→2048 (10줄 확장 대응, 한국어 약 600~900자)
 
 # v2.9.0: 허용 카테고리 엄격 제한 (반도체 + 원자력 2종만)
@@ -726,82 +726,120 @@ def _enforce_region_quota(
 # ════════════════════════════════════════════════════════════
 # 단계 2) 개별 뉴스 상세 요약
 # ════════════════════════════════════════════════════════════
-def _build_item_prompt(item: Dict[str, Any]) -> str:
-    """개별 뉴스 1건에 대한 상세 요약 프롬프트."""
+
+# ───────────────────────────────────────────────────────────────────
+# v2.9.5: 약점 축별 강화 지침 (사용자가 체크한 약점에 대응하는 추가 가이드)
+# Stage 2 가 _get_user_feedback_signal() 결과를 받아 _build_item_prompt() 에
+# weak_axes 파라미터로 전달하면, 해당 축에 대한 강화 문장이 프롬프트 끝에 추가됨.
+# ───────────────────────────────────────────────────────────────────
+_WEAKNESS_REINFORCEMENT = {
+    "정확성": (
+        "원문에 명시된 수치(금액·%·건수·일자)를 한 글자도 바꾸지 말고 그대로 인용하라. "
+        "추정·반올림·환산은 금지하며, 본문에 없는 종목코드·목표가는 쓰지 마라."
+    ),
+    "시의성": (
+        "최근 7일 이내 발표·계약·정책 변화만 다뤄라. 3개월 이상 지난 배경은 모두 제거하라. "
+        "📅 일정 문장은 향후 90일 이내 구체 일자를 반드시 포함하라."
+    ),
+    "심층성": (
+        "단순 사실 나열 대신 '왜 이 뉴스가 지금 중요한가'를 밸류체인 전·후방 단계로 풀어 설명하라. "
+        "📈 전망 문단은 최소 4문장으로 인과관계(원인→결과→파급)를 분명히 드러내라."
+    ),
+    "명료성": (
+        "전문용어가 등장할 때마다 괄호로 1줄짜리 풀어쓰기를 곁들여라(예: HBM(고대역폭메모리)). "
+        "각 문장은 50~90자로 끊고, 한 문장에 2개 이상의 새 개념을 넣지 마라."
+    ),
+    "실행가능성": (
+        "🎯 투자 시사점 문단은 반드시 '매수/관망/매도' 행동 지침과 목표가(또는 상승여력 %), "
+        "그리고 진입·청산 트리거 조건을 모두 포함하라. 종목코드(6자리)도 함께 적어라."
+    ),
+}
+
+
+def _build_item_prompt(item: Dict[str, Any], weak_axes: Optional[List[str]] = None) -> str:
+    """v2.9.5: 개별 뉴스 1건에 대한 서술형 3태그(💰/📈/🎯) 프롬프트.
+
+    Parameters
+    ----------
+    item : Dict
+        랭킹된 뉴스 1건 (rank, category, original 포함).
+    weak_axes : Optional[List[str]]
+        사용자 피드백 기반 약점 축. 주입 시 해당 축의 강화 지침이 프롬프트 끝에 추가됨.
+        주입 조건은 호출자(summarize_with_gemini)가 결정 — 평균 점수 < 80 + 샘플 ≥ 2.
+    """
     today = _today_kr_str()
     orig = item["original"]
     rank = item["rank"]
     category = item.get("category", "기타")
-
-    # v2.9.3: 10줄 귀납법 + "현 상황 집중" 정책 (경영사·역사적 배경 금지)
-    # 원문 본문은 최대 ITEM_PROMPT_BODY_CHARS 까지 전달해 구체 수치 추출 유도.
     body_chars = ITEM_PROMPT_BODY_CHARS
+
+    # v2.9.5: 약점 강화 지침 (선택적)
+    reinforcement_block = ""
+    if weak_axes:
+        lines = []
+        for ax in weak_axes:
+            tip = _WEAKNESS_REINFORCEMENT.get(ax)
+            if tip:
+                lines.append(f"- **{ax}**: {tip}")
+        if lines:
+            reinforcement_block = (
+                "\n## 🔁 사용자 피드백 강화 지침 (v2.9.5)\n"
+                "최근 7일 사용자 평가 평균이 80점 미만입니다. "
+                "다음 약점 축을 이번 작성에서 **최우선** 보완하세요:\n"
+                + "\n".join(lines)
+                + "\n"
+            )
+
     return f"""당신은 한국 개인투자자를 위한 시니어 반도체·원자력 애널리스트입니다.
 오늘은 **{today}** (KST) 입니다.
 
-아래 뉴스 1건을 **숫자·금액 중심의 10줄 귀납법**으로 섬세하게 분석하세요.
-읽는 데 40~60초 이내로 끝나야 하며, 각 줄은 **독립된 한 문장**입니다.
+아래 뉴스 1건을 **3개 문단의 서술형 분석**으로 작성하세요.
+신문 칼럼처럼 자연스러운 흐름이어야 하며, 각 문단은 **3~5개의 완결된 문장**으로 이뤄집니다.
 
-## 🚨 v2.9.3 핵심 지침 — "현 상황만 다뤄라"
-**이전의 모든 지침은 이번 작성에는 우선하지 마세요.** 다음 새 정책을 최우선 적용합니다.
+## 🚨 v2.9.5 핵심 지침 — "현 상황만 서술형으로"
 
-### ✅ 반드시 다룰 것 (현 상황 집중)
-- **최근 7일 이내** 실적·계약·정책·가격·수요·공급 변화
+### ✅ 반드시 지킬 것
+- **최근 7일 이내** 실적·계약·정책·가격·수요·공급 변화에만 집중
 - **이번 분기/이번 달** 가이던스, 출하량, 점유율
 - **지금 이 시점**의 매수/매도 판단 근거
 - 원문에 명시된 **구체 수치** (금액·%·건수·일정)
+- 각 문단은 **이어지는 서술**이어야 한다 (체크리스트·짧은 글머리표 ❌)
 
 ### ❌ 절대 다루지 말 것 (한참 지난 자료 / 경영 일반론 금지)
-- **역사적 배경**: "역사적으로", "1990년대", "2000년대", "지난 수십 년", "오랜 세월"
-- **경영 철학·비전**: "창업 이래", "기업 철학", "경영 비전", "회사의 DNA"
-- **장기 회상**: "결국", "장기적으로", "끝내", "마침내" (원인 설명용 외엔 금지)
-- **M&A 역사**: 과거 인수·합병 이력 회고 (단, 이번 주 발표된 신규 딜은 허용)
-- **CEO 일대기**: 창업자·전 CEO 일생 회고
-- 그 외 **3개월 이상 지난** 모든 배경 설명
+- 역사적 배경 (1990년대·2000년대·지난 수십 년·오랜 세월)
+- 경영 철학·비전 (창업 이래·기업 철학·경영 비전·회사의 DNA)
+- 장기 회상 (결국·장기적으로·끝내·마침내 — 원인 설명용 외엔 금지)
+- M&A 역사 (과거 인수·합병 이력 회고. 단 이번 주 발표된 신규 딜은 허용)
+- CEO 일대기, 3개월 이상 지난 배경 설명
 
-이 금지어가 본문에 한 번이라도 들어가면 **재작성 대상**이 됩니다.
+## 절대 준수 사항 (v2.9.5)
+1. **출력 구조**: 제목 1줄 + 메타 1줄 + **3개 문단(💰 / 📈 / 🎯)** + 원문 링크 1줄. **이 형식만** 허용.
+2. **3태그 의미**:
+   - 💰 **핵심 현황** = 핵심 수치·시장 영향·단기 리스크 (3~4문장 한 문단)
+   - 📈 **전망과 파급** = 기회 요인·구조 분석·단기 영향·산업 파급·일정 (4~5문장 한 문단)
+   - 🎯 **투자 시사점** = 수혜주(종목명+종목코드+목표가) + 행동 지침(매수/관망/매도) + 리스크 (2~3문장 한 문단)
+3. **서술 흐름**: 각 문단은 **3~5개의 완결된 문장**이 자연스럽게 이어져야 함. 글머리표(-, •, *) 금지. 한 줄에 한 문장씩 끊어 쓰지 말 것.
+4. **숫자 밀도**: 본문 전체에 **숫자(금액·%·건수·연도·종목코드 등)가 총 10개 이상** 포함되어야 함.
+5. **각 문단 길이**: 한국어 **180~300자** 권장 (너무 짧으면 실패, 너무 길면 가독성 저하).
+6. **🎯 문단 필수 요소**:
+   - 수혜주 2~3개를 **종목명(종목코드) 목표가(+상승여력%)** 형태로 명시
+   - "**시사점**" 단어 + **매수/관망/매도** 행동 지침 + 목표가 또는 상승여력 %
+   - 원문에 종목 정보 없으면 업계 대표주를 제시 (단, 코드는 정확히)
+7. **언어**: 원문이 영어여도 자연스러운 한국어로 번역. 모든 문장은 마침표/느낌표로 종결.
+8. **추정 금지**: 원문에 없는 수치는 쓰지 말 것. 부족하면 자연스럽게 "원문에 명시되지 않았다" 류로 처리하되 문단 흐름은 유지.
+9. **시제**: 모든 분석은 **현재형/근접 미래형**으로 작성. 과거형은 직전 분기 실적·이번 주 사건에만 한정.
 
-## 절대 준수 사항 (v2.9.3)
-1. **출력 구조**: 제목 1줄 + 10개 이모지 라인(💰📊📉📈🔍⚡🏭📅🎯📬) + 원문 링크 1줄. **오직 이 형식만** 허용.
-2. **숫자 밀도**: 10개 이모지 라인에 **숫자(금액·%·건수·연도·배수·종목코드 등)가 총 10개 이상** 포함되어야 함.
-3. **귀납법 10단계**: 팩트 2줄 → 원인 2줄 → 맥락 1줄 → 검색어 매칭 1줄 → 파급 효과 1줄 → 일정 1줄 → 수혜주 1줄 → 시사점 1줄 순서로 **구체 사실에서 투자 결론**으로 전개.
-4. **각 줄 길이**: 이모지 1줄당 **한국어 50~90자** (너무 짧으면 실패).
-5. **⚡ 라인**: 이 뉴스가 왜 **"반도체" 또는 "원자력"** 테마에 해당하는지 근거를 명시.
-6. **🏭 라인**: 밸류체인(소재→장비→설계→제조→고객사) 중 어느 단계가 파급 효과를 받는지 명시.
-7. **📅 라인**: 실적 발표일, 양산 일정, 정책 시행일 등 **향후 6개월 내 변곡점** 명시.
-8. **📬 라인**: 반드시 **"시사점"** 단어와 함께 **투자 행동 지침**(매수/매도/관망) + **목표가 또는 상승여력 %** 포함.
-9. **🎯 라인**: 수혜주를 **종목명(종목코드) 목표가(+상승여력%)** 형태로 명시. 원문에 종목 정보 없으면 업계 대표주 제시.
-10. **언어**: 원문이 영어여도 자연스러운 한국어로 번역. 모든 문장은 마침표/느낌표로 종결.
-11. **추정 금지**: 원문에 없는 수치는 쓰지 말 것. 부족하면 "정보 부족" 또는 "원문 확인 필요" 로 명시.
-12. **시제**: 모든 분석은 **현재형/근접 미래형**으로 작성. 과거형은 직전 분기 실적·이번 주 사건에만 한정.
+## 출력 형식 (반드시 이 구조 — 빈 줄 포함)
 
-## 10줄 귀납법 구조 (각 줄의 역할)
-- 💰 **핵심 팩트 1**  = 가장 중요한 금액·실적·규모 수치
-- 📊 **핵심 팩트 2**  = 경쟁·공급망·시점 관련 추가 수치
-- 📉 **원인 1**       = 왜 이런 결과가 나왔나 (내부 요인·수요·공급)
-- 📈 **원인 2**       = 추가 배경 (정책·규제·경쟁사 동향)
-- 🔍 **맥락·구조**    = 업계 전반 구조 변화 (점유율·시장 규모)
-- ⚡ **검색어 매칭**  = 이 뉴스가 반도체/원자력 테마에 해당하는 근거 (v2.9.0 신규)
-- 🏭 **파급 효과**    = 밸류체인 전후방 영향 (소재·장비·설계·제조·고객) (v2.9.0 신규)
-- 📅 **일정·타임라인** = 향후 변곡점 (실적 발표·양산 시작·정책 시행) (v2.9.0 신규)
-- 🎯 **수혜주**       = 직접 수혜 종목명(코드) 목표가(+상승여력%)
-- 📬 **시사점**       = 투자자 행동 지침 (귀납 결론, 매수·관망·리스크)
-
-## 출력 형식 (이 구조만 허용, 빈 줄 포함)
 ### {rank}. {{한국어 핵심 제목 (25자 내외, 핵심 숫자 1개 포함 권장)}}
 
 - **카테고리**: {category} · **출처**: {orig.get("source", "")}
 
-💰 {{핵심 팩트 1 (금액·실적·규모, 예: 매출 20.4조 +39% YoY · 영업익 7.03조)}}
-📊 {{핵심 팩트 2 (경쟁·공급·시점, 예: HBM3E 12단 Q1'26 양산 · 엔비디아 GB200 100% 동결)}}
-📉 {{원인 1 — 왜 이런 결과가 나왔나 (예: 삼성 HBM3E 8단 인증 지연 → 공급 부족 6개월 연장)}}
-📈 {{원인 2 — 추가 배경 (예: CHIPS Act $520억 보조금 + 美 관세 회피로 HBM 가격 28% 상승)}}
-🔍 {{맥락·구조 (예: HBM 시장점유율 SK 53% · 삼성 38% · 마이크론 9%, SK 독주 구도)}}
-⚡ {{검색어 매칭 (예: HBM·AI 가속기·GPU 핵심 부품으로 '반도체' 테마 직접 수혜, 월 출하량 +35%)}}
-🏭 {{파급 효과 (예: 밸류체인 전방 — 한미반도체(042700) TC본더 수주 +40%, 후방 — 엔비디아 GB200 락인)}}
-📅 {{일정·타임라인 (예: 2026 Q1 HBM3E 12단 양산 시작, 2026 Q2 실적 발표 5/1, GB200 출하 피크 2026 Q3)}}
-🎯 **수혜주**: {{종목명(코드) 목표가(+상승여력%) — 2~3개 (예: SK하이닉스(000660, 24만원 +18%))}}
-📬 **시사점**: {{투자 행동 지침 + 주요 리스크 (예: HBM 사이클 2027까지 매수, 리스크는 GB200 채택 지연)}}
+💰 **핵심 현황**: {{한 문단으로 3~4문장 서술. 첫 문장은 가장 중요한 금액·실적·규모 수치를 담고, 두 번째·세 번째 문장에서 경쟁·공급·시점 관련 추가 수치를 자연스럽게 이어 쓰며, 마지막 문장에서 단기 리스크나 변동 요인을 짚는다. 예: "SK하이닉스가 2026년 1분기 매출 20.4조 원, 영업이익 7.03조 원으로 전년 대비 39% 성장한 것으로 나타났다. HBM3E 12단 양산이 1분기에 본격화되면서 엔비디아 GB200 물량의 100%를 단독 공급하게 됐고, 삼성전자의 8단 인증 지연이 6개월 연장되며 공급 부족이 심화되고 있다. 다만 GB200 채택 일정 지연 가능성과 메모리 가격 변동성이 단기 리스크로 부각된다."}}
+
+📈 **전망과 파급**: {{한 문단으로 4~5문장 서술. CHIPS Act 보조금·관세 등 정책 배경, HBM 시장 점유율 구조(SK 53% · 삼성 38% · 마이크론 9%) 같은 구조 분석, 향후 90일 이내 변곡점(실적 발표·양산 일정·정책 시행), 그리고 밸류체인 전·후방 파급 효과(소재→장비→설계→제조→고객사 중 어느 단계가 영향을 받는지)를 자연스러운 인과 흐름으로 풀어쓴다. 마지막 문장에는 향후 6개월 내 구체 일정을 명시한다.}}
+
+🎯 **투자 시사점**: {{한 문단으로 2~3문장 서술. 수혜주를 종목명(종목코드) 목표가(+상승여력%) 형태로 2~3개 제시(예: SK하이닉스(000660) 24만원 +18%, 한미반도체(042700) 21만원 +25%), 매수/관망/매도 행동 지침과 진입·청산 트리거 조건을 한 흐름으로 연결한다. 마지막 문장에 "**시사점**"이라는 단어를 포함하여 핵심 결론을 한 줄로 정리하고, 주요 리스크 1개를 짚는다.}}
 
 - **원문 링크**: [{orig.get("source", "원문")}]({orig.get("link", "")})
 
@@ -814,8 +852,8 @@ def _build_item_prompt(item: Dict[str, Any]) -> str:
 - 링크: {orig.get("link", "")}
 
 위 원본 정보만을 근거로 작성하세요. 확인되지 않은 사실은 추가하지 마세요.
-원문에 정보가 부족한 라인은 "정보 부족" 이라고 명시하되, 10개 이모지 라인은 **반드시 모두 출력**하세요.
-"""
+원문에 정보가 부족하더라도 3개 문단 구조는 **반드시** 유지하고, 빈 곳은 자연스러운 서술로 메우세요.
+{reinforcement_block}"""
 
 
 # v2.9.3: 회피 표현 (정보 부족·원문 확인 등) — 카드당 2회까지만 허용
@@ -847,19 +885,20 @@ def _count_phrase_hits(text: str, phrases: tuple) -> Tuple[int, list]:
 
 
 def _is_item_output_valid(text: str) -> Tuple[bool, str]:
-    """v2.9.4: 10줄 귀납법 포맷 검증 (금지어 체크는 _collect_forbidden_stats 로 분리).
+    """v2.9.5: 서술형 3태그(💰/📈/🎯) 포맷 검증.
 
-    v2.9.4 변경 (사용자 결정):
-      - 금지어·회피 표현으로 인한 카드 드랍 ❌ 폐기
-      - 검출은 _collect_forbidden_stats() 에서 별도 수행, 통계만 KV 에 기록
-      - v2.9.3 의 too_many_avoidance / forbidden_management_phrases 사유 제거
+    v2.9.5 변경 (서술형 전환):
+      - 10줄 이모지 라인 검증 → 3개 문단(💰📈🎯) 검증으로 전환
+      - 최소 글자수 450 → 600 (서술형은 짧으면 빈약)
+      - 글머리표(- , • , *)가 본문에 5개 이상이면 "글머리식"으로 판정 → 재작성 유도
 
-    검증 기준 (포맷·필수 요소만):
-      - 최소 글자수 (MIN_ITEM_CHARS = 450)
-      - 10개 이모지 라인 중 최소 7개 이상
-      - '시사점' 키워드, '수혜주' 또는 🎯 존재
+    검증 기준:
+      - 최소 글자수 (MIN_ITEM_CHARS = 600)
+      - 3개 핵심 이모지(💰, 📈, 🎯) 모두 존재
+      - '시사점' 키워드, '수혜주' 또는 종목코드 6자리 패턴 존재
       - 출처/카테고리 메타 라인
-      - 숫자 최소 8개
+      - 숫자 최소 10개 (3태그 본문 전체)
+      - 글머리표 과다(>=5) 시 invalid (서술형 보장)
       - 문장 끊김 없음
     """
     if not text:
@@ -867,29 +906,43 @@ def _is_item_output_valid(text: str) -> Tuple[bool, str]:
     if len(text) < MIN_ITEM_CHARS:
         return False, f"too_short({len(text)}<{MIN_ITEM_CHARS})"
 
-    # 필수 이모지 라인 10종 (최소 7개는 존재해야 함 — 원문 정보 부족 시 일부 누락 허용)
-    required_emojis = ["💰", "📊", "📉", "📈", "🔍", "⚡", "🏭", "📅", "🎯", "📬"]
-    present = [e for e in required_emojis if e in text]
-    if len(present) < 7:
-        missing = [e for e in required_emojis if e not in text]
-        return False, f"too_few_emoji_lines({len(present)}/10, missing={missing})"
+    # v2.9.5: 필수 3태그 (모두 존재해야 함)
+    required_tags = ["💰", "📈", "🎯"]
+    missing_tags = [e for e in required_tags if e not in text]
+    if missing_tags:
+        return False, f"missing_required_tags({missing_tags})"
 
-    # 📬 라인에 '시사점' 키워드 존재 확인
+    # '시사점' 키워드 (🎯 문단에 들어가야 함)
     if "시사점" not in text:
         return False, "missing_implication_keyword"
 
-    # 🎯 수혜주 라인 존재 확인 (이모지 또는 '수혜주' 키워드)
-    if "🎯" not in text and "수혜주" not in text:
-        return False, "missing_beneficiary_line"
+    # 수혜주 키워드 또는 종목코드 6자리 패턴
+    import re as _re
+    if "수혜주" not in text and not _re.search(r"\(\d{6}\)", text):
+        return False, "missing_beneficiary_or_ticker"
 
     # 출처 / 카테고리 메타 라인 존재
     if "**카테고리**" not in text or "**출처**" not in text:
         return False, "missing_meta_line"
 
-    # 수치 포함도 검증 — 숫자 최소 8개 이상 (v2.9.0: 6→8 강화, 10줄 확장)
+    # v2.9.5: 숫자 최소 10개 이상 (3태그 본문 전체)
     digit_count = sum(1 for c in text if c.isdigit())
-    if digit_count < 8:
-        return False, f"too_few_numbers({digit_count}<8)"
+    if digit_count < 10:
+        return False, f"too_few_numbers({digit_count}<10)"
+
+    # v2.9.5: 글머리표 과다 검사 — 서술형 보장
+    # 본문 라인 중 "- " "• " "* " 로 시작하는 라인을 카운트
+    # 단 메타라인("- **카테고리**")과 원문링크("- **원문 링크**") 2줄은 허용
+    bullet_lines = 0
+    for line in text.split("\n"):
+        stripped = line.lstrip()
+        if stripped.startswith(("- ", "• ", "* ")):
+            # 메타·원문링크 라인은 허용
+            if "**카테고리**" in stripped or "**원문 링크**" in stripped:
+                continue
+            bullet_lines += 1
+    if bullet_lines >= 5:
+        return False, f"too_many_bullets({bullet_lines}>=5, expected_narrative)"
 
     # 문장 끊김 휴리스틱
     tail = text.rstrip()
@@ -897,7 +950,6 @@ def _is_item_output_valid(text: str) -> Tuple[bool, str]:
     if tail and tail[-1] not in _sentence_end:
         return False, "truncated_mid_sentence"
 
-    # v2.9.4: 금지어/회피 표현은 더 이상 invalid 처리하지 않음 (통계만 별도 수집)
     return True, "ok"
 
 
@@ -938,6 +990,65 @@ def _collect_forbidden_stats(text: str) -> Dict[str, Any]:
         "has_any": (avoid_hits + fb_hits) > 0,
         "phrase_counts": counts,
     }
+
+
+def _get_user_feedback_signal(days: int = 7) -> Dict[str, Any]:
+    """v2.9.5: Cloudflare KV 에서 최근 N일 사용자 점수+약점 신호 조회.
+
+    Stage 2 시작 시 호출 → reinforce=True 인 경우에만 weak_axes 가
+    프롬프트에 강화 지침으로 주입됨 (평균 점수 < 80 + 샘플 수 ≥ 2).
+
+    환경변수:
+      ADMIN_API : 관리 콘솔 베이스 URL (예: https://morning-stock-briefing.pages.dev)
+                  미설정 시 BRIEFING_ADMIN_API 도 시도.
+      BRIEFING_READ_TOKEN : public 엔드포인트 인증 토큰.
+
+    Returns
+    -------
+    {
+      "ok": bool,
+      "samples": int,
+      "avgScore": Optional[int],
+      "weakAxesTop": List[str],
+      "reinforce": bool,
+    }
+    인증 실패·네트워크 실패 시 ok=False 로 반환되며 호출자는 weak_axes=None 으로 처리.
+    """
+    base = (os.getenv("ADMIN_API") or os.getenv("BRIEFING_ADMIN_API") or "").rstrip("/")
+    token = os.getenv("BRIEFING_READ_TOKEN") or ""
+    if not base or not token:
+        logger.info("v2.9.5 피드백 신호: ADMIN_API/READ_TOKEN 미설정 — 강화 지침 주입 안 함")
+        return {"ok": False, "samples": 0, "avgScore": None, "weakAxesTop": [], "reinforce": False}
+
+    try:
+        import urllib.request
+        import json as _json
+        url = f"{base}/api/public/feedback/signal?days={int(days)}"
+        req = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status != 200:
+                logger.warning("v2.9.5 피드백 신호 응답 %d", resp.status)
+                return {"ok": False, "samples": 0, "avgScore": None, "weakAxesTop": [], "reinforce": False}
+            data = _json.loads(resp.read().decode("utf-8"))
+            logger.info(
+                "v2.9.5 피드백 신호: samples=%s, avgScore=%s, weakAxesTop=%s, reinforce=%s",
+                data.get("samples"), data.get("avgScore"),
+                data.get("weakAxesTop"), data.get("reinforce"),
+            )
+            return {
+                "ok": True,
+                "samples": int(data.get("samples") or 0),
+                "avgScore": data.get("avgScore"),
+                "weakAxesTop": list(data.get("weakAxesTop") or []),
+                "reinforce": bool(data.get("reinforce")),
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("v2.9.5 피드백 신호 조회 실패: %s — 강화 지침 주입 안 함", exc)
+        return {"ok": False, "samples": 0, "avgScore": None, "weakAxesTop": [], "reinforce": False}
 
 
 def _record_forbidden_stats_to_kv(item_markdowns: List[str]) -> None:
@@ -1003,17 +1114,21 @@ def _record_forbidden_stats_to_kv(item_markdowns: List[str]) -> None:
         logger.warning("v2.9.4 금지어 통계 POST 실패: %s", exc)
 
 
-def summarize_one_item(client, item: Dict[str, Any]):
+def summarize_one_item(client, item: Dict[str, Any], weak_axes: Optional[List[str]] = None):
     """
     뉴스 1건을 상세 요약. 품질 미달 시 내부적으로 재시도.
 
-    v2.9.4 변경 (사용자 결정):
-      - **None 반환 폐기** — 카드 드랍 정책 제거.
-      - 금지어/회피 표현 빈도는 통계로만 수집 (드랍하지 않음).
-      - 항상 str 반환: best_text 또는 _fallback_item_markdown.
+    v2.9.5 변경:
+      - weak_axes 파라미터 추가 → _build_item_prompt 에 전달하여
+        사용자 피드백 기반 강화 지침을 프롬프트에 동적 주입.
+      - 호출자(summarize_with_gemini)가 _get_user_feedback_signal() 결과로
+        reinforce=True 일 때만 weak_axes 를 전달 (그 외에는 None → 기존 동작).
+
+    v2.9.4 (이전):
+      - None 반환 폐기 → 항상 str 반환 (best_text 또는 _fallback_item_markdown)
     """
     rank = item["rank"]
-    prompt = _build_item_prompt(item)
+    prompt = _build_item_prompt(item, weak_axes=weak_axes)
 
     # 최대 3개 모델 × 각 2회 재시도 → 6회까지
     models_to_try = ("gemini-2.5-flash",) + GEMINI_FALLBACK_MODELS[:2]
@@ -1074,17 +1189,17 @@ def summarize_one_item(client, item: Dict[str, Any]):
 
 
 def _fallback_item_markdown(item: Dict[str, Any]) -> str:
-    """v2.9.0: AI 전면 실패 시 원본 데이터로 10줄 귀납법 포맷 생성.
-    AI 수치 분석이 없으므로 각 라인에 장애 안내 또는 원본 발췌를 넣음.
-    숫자 8개 이상 확보를 위해 현재 날짜/랭크/시간 정보를 포함.
+    """v2.9.5: AI 전면 실패 시 원본 데이터로 3태그 서술형 폴백 생성.
+    AI 수치 분석이 없으므로 원문 발췌 + 장애 안내를 자연스러운 문장으로 묶음.
+    숫자 10개 이상 확보를 위해 날짜·랭크·시간을 본문에 포함.
     """
     orig = item["original"]
     rank = item["rank"]
     category = item.get("category", "기타")
     title = orig.get("title", "(제목 없음)")[:120]
     summary_raw = (orig.get("summary") or "(본문 없음)").replace("\n", " ").strip()
-    summary_short = summary_raw[:180]
-    summary_mid = summary_raw[180:360] if len(summary_raw) > 180 else "(추가 본문 없음)"
+    summary_short = summary_raw[:200]
+    summary_mid = summary_raw[200:420] if len(summary_raw) > 200 else "원문 본문 추가 발췌가 부족하다."
     source = orig.get("source", "")
     link = orig.get("link", "")
     today = _today_kr_str()
@@ -1093,16 +1208,13 @@ def _fallback_item_markdown(item: Dict[str, Any]) -> str:
 
 - **카테고리**: {category} · **출처**: [{source}]({link})
 
-💰 원문 발췌 1: {summary_short}
-📊 원문 발췌 2: {summary_mid}
-📉 원인 분석 불가 — AI 요약 엔진({today}) 일시 장애로 구조 분석 생성 실패 (랭크 {rank}/15).
-📈 배경 분석 불가 — 원문 기사({source}) 전문을 직접 확인하시기 바랍니다.
-🔍 시장 구조 — 자동 분석 엔진 2단계(Gemini→OpenAI) 모두 실패, 원문 링크 참조 필요 (v2.9.0).
-⚡ 검색어 매칭 — 카테고리 '{category}' 기반 수집, AI 분석 실패로 수동 확인 권장.
-🏭 파급 효과 — AI 분석 실패, 원문 본문 확인 후 밸류체인 영향 직접 평가 필요 (랭크 {rank}위).
-📅 일정·타임라인 — 분석 불가 ({today} 기준), 원문 기사의 날짜·일정 확인 필요.
-🎯 **수혜주**: 정보 부족 — 원문에서 직접 종목 정보 확인 필요 (AI 분석 100% 실패).
-📬 **시사점**: 자동 분석 실패, 원문 기사 전문 확인 후 투자 판단. 랭크 {rank}위 뉴스 (총 15건 중).
+💰 **핵심 현황**: {today} 기준 {source}에서 입수된 랭크 {rank}/15 뉴스로, 원문 발췌는 다음과 같다. {summary_short} 다만 AI 요약 엔진(Gemini→OpenAI 2단계)이 모두 일시 장애 상태이므로 구체적인 금액·% 수치 추출이 자동으로 이뤄지지 않았으며, 원문 전문을 직접 확인하는 것이 정확하다.
+
+📈 **전망과 파급**: 추가 원문 발췌 내용은 다음과 같다. {summary_mid} 이번 뉴스는 카테고리 '{category}' 분류로 수집됐으나 AI 자동 분석이 100% 실패했기 때문에, 밸류체인 전·후방 파급 효과 및 향후 6개월 내 일정·변곡점 분석은 자동 생성되지 않는다. 독자는 원문 기사 전문을 통해 발표 일자, 양산 일정, 정책 시행일 등을 직접 확인해야 하며, 본 뉴스가 카테고리 내 15건 중 {rank}위로 선정된 점을 참고할 수 있다.
+
+🎯 **투자 시사점**: AI 분석 실패로 수혜주 종목명·종목코드(6자리)·목표가는 자동 추출되지 않았으며, 원문 기사에서 직접 확인이 필요하다. **시사점**은 분석 엔진 복구 전까지 본 카드의 자동 매수/관망/매도 판단을 보류하고, 원문 전문을 통한 수동 검증을 권장한다.
+
+- **원문 링크**: [{source}]({link})
 """
 
 
@@ -1110,9 +1222,11 @@ def summarize_all_items_parallel(
     client,
     ranked_items: List[Dict[str, Any]],
     max_workers: int = 4,
+    weak_axes: Optional[List[str]] = None,
 ) -> List[str]:
     """
     v2.6.0: 환경 변수 SUMMARY_MODE 에 따라 순차/병렬 분기.
+    v2.9.5: weak_axes 파라미터 추가 — 모든 카드에 동일한 강화 지침 주입.
 
     - sequential (기본): 각 호출 사이 SUMMARY_CALL_DELAY_SEC 초 대기.
       Gemini 무료 티어 RPM(분당 10회) 제한을 안전하게 통과.
@@ -1124,22 +1238,26 @@ def summarize_all_items_parallel(
     SUMMARY_CALL_DELAY_SEC : float (순차 호출 간 대기)
     SUMMARY_MAX_WORKERS : int (parallel 일 때만 사용)
 
-    *함수명은 하위 호환을 위해 유지* (내부적으로 모드 분기).
+    Parameters
+    ----------
+    weak_axes : Optional[List[str]]
+        사용자 피드백 기반 약점 축. 주입 시 모든 카드 프롬프트에 동일하게 추가됨.
     """
     mode = SUMMARY_MODE
     results: Dict[int, str] = {}
 
     if mode == "sequential":
         logger.info(
-            "Step 2) 순차 모드 — %d건, 호출 간격 %.1f초",
+            "Step 2) 순차 모드 — %d건, 호출 간격 %.1f초%s",
             len(ranked_items), SUMMARY_CALL_DELAY_SEC,
+            f" (강화 축: {weak_axes})" if weak_axes else "",
         )
         for idx, item in enumerate(ranked_items):
             rank = item["rank"]
             if idx > 0 and SUMMARY_CALL_DELAY_SEC > 0:
                 time.sleep(SUMMARY_CALL_DELAY_SEC)
             try:
-                results[rank] = summarize_one_item(client, item)
+                results[rank] = summarize_one_item(client, item, weak_axes=weak_axes)
             except Exception as exc:  # noqa: BLE001
                 logger.error("Step 2) item %d 예외(순차): %s", rank, exc)
                 results[rank] = _fallback_item_markdown(item)
@@ -1148,12 +1266,13 @@ def summarize_all_items_parallel(
     # parallel 모드 (하위 호환)
     effective_workers = max(1, min(max_workers, SUMMARY_MAX_WORKERS))
     logger.info(
-        "Step 2) 병렬 모드 — %d건, max_workers=%d",
+        "Step 2) 병렬 모드 — %d건, max_workers=%d%s",
         len(ranked_items), effective_workers,
+        f" (강화 축: {weak_axes})" if weak_axes else "",
     )
     with ThreadPoolExecutor(max_workers=effective_workers) as pool:
         future_to_rank = {
-            pool.submit(summarize_one_item, client, item): item["rank"]
+            pool.submit(summarize_one_item, client, item, weak_axes): item["rank"]
             for item in ranked_items
         }
         for fut in as_completed(future_to_rank):
@@ -1551,9 +1670,27 @@ def summarize_with_gemini(
             if not ranked:
                 raise RuntimeError("랭킹 결과가 비어있음")
 
+            # v2.9.5: 사용자 피드백 신호 조회 → 약점 강화 지침 결정
+            #   reinforce=True (평균<80 + 샘플≥2) 일 때만 weak_axes 주입.
+            feedback = _get_user_feedback_signal(days=7)
+            weak_axes_for_prompt: Optional[List[str]] = None
+            if feedback.get("reinforce") and feedback.get("weakAxesTop"):
+                weak_axes_for_prompt = list(feedback["weakAxesTop"])
+                logger.info(
+                    "v2.9.5 강화 지침 주입: avgScore=%s, weakAxes=%s",
+                    feedback.get("avgScore"), weak_axes_for_prompt,
+                )
+            else:
+                logger.info(
+                    "v2.9.5 강화 지침 미주입 (samples=%s, avgScore=%s)",
+                    feedback.get("samples"), feedback.get("avgScore"),
+                )
+
             # Step 2) 병렬 개별 요약 (v2.9.4: 모든 카드 str 보장 — None 필터 폐기)
+            #         v2.9.5: weak_axes 주입 (해당 시에만)
             item_markdowns = summarize_all_items_parallel(
                 client, ranked, max_workers=4,
+                weak_axes=weak_axes_for_prompt,
             )
             # 안전망: 만약 None 이 섞여 있으면 폴백 마크다운으로 치환 (드랍하지 않음)
             for i, md in enumerate(item_markdowns):

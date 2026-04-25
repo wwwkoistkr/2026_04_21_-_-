@@ -2766,11 +2766,75 @@
         }
       }
 
+      // v2.9.5: 강화 지침 패널 갱신
+      updateReinforcePanel(j.items)
+
       // Chart.js 그래프
       renderUserScoreChart(j.items)
     } catch (e) {
       console.warn('[user-score] 추이 로드 실패:', e)
       elToday.textContent = '오류'
+    }
+  }
+
+  /**
+   * v2.9.5: 7일 점수 추이 데이터를 기반으로 내일 Stage 2 에 적용될
+   * 강화 지침을 추정해서 어드민에 표시.
+   *
+   * 서버측 _get_user_feedback_signal() 과 동일한 로직을 클라이언트에서 미러링:
+   *   - 어제부터 거꾸로 7일 (오늘 제외)
+   *   - 입력된 점수만 집계
+   *   - samples >= 2 && avgScore < 80 → reinforce=true
+   *   - 약점 축 빈도 Top 3 노출
+   */
+  function updateReinforcePanel(items) {
+    const panel = document.getElementById('reinforcePanel')
+    const detail = document.getElementById('reinforceDetail')
+    if (!panel || !detail) return
+
+    // 오늘 날짜 (KST)
+    const today = todayKstISO().replace(/-/g, '')
+    // items 는 오래된→최신 순. 오늘은 제외하고 입력된 점수만 모음
+    const past = (items || []).filter(it =>
+      it.date !== today
+      && typeof it.score === 'number'
+      && it.score !== null
+    )
+    if (past.length < 2) {
+      detail.textContent = `과거 7일 점수 샘플 ${past.length}개 — 2개 이상 누적되면 자동 분석 시작 (현재 강화 지침 미주입).`
+      panel.classList.remove('hidden')
+      panel.classList.remove('from-rose-50','to-pink-50','border-rose-200')
+      panel.classList.add('from-gray-50','to-gray-100','border-gray-200')
+      return
+    }
+
+    // 평균
+    const avg = Math.round(past.reduce((s, x) => s + x.score, 0) / past.length)
+    // 약점 축 빈도
+    const counts = {}
+    for (const it of past) {
+      for (const ax of (it.weakAxes || [])) {
+        counts[ax] = (counts[ax] || 0) + 1
+      }
+    }
+    const top = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([k, v]) => `${k}(${v}회)`)
+
+    const reinforce = avg < 80
+    if (reinforce && top.length > 0) {
+      panel.classList.remove('hidden','from-gray-50','to-gray-100','border-gray-200')
+      panel.classList.add('from-rose-50','to-pink-50','border-rose-200')
+      detail.innerHTML = `최근 7일 평균 <b>${avg}점</b> (목표 80점 미만) → 다음 약점 축이 강화 지침으로 주입됩니다: <b>${top.join(' · ')}</b>. 내일 Stage 2 부터 적용됩니다.`
+    } else if (reinforce) {
+      panel.classList.remove('hidden','from-gray-50','to-gray-100','border-gray-200')
+      panel.classList.add('from-rose-50','to-pink-50','border-rose-200')
+      detail.innerHTML = `최근 7일 평균 <b>${avg}점</b> (목표 80점 미만)이지만 약점 축이 미체크 상태 → 강화 지침 미주입. 점수 입력 시 약점 카테고리도 함께 체크해 주세요.`
+    } else {
+      panel.classList.remove('hidden','from-rose-50','to-pink-50','border-rose-200')
+      panel.classList.add('from-emerald-50','to-green-50','border-emerald-200')
+      detail.innerHTML = `최근 7일 평균 <b>${avg}점</b> — 80점 이상으로 안정. 강화 지침 미주입 (현재 프롬프트 그대로 사용).`
     }
   }
 
