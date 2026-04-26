@@ -3176,7 +3176,7 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.9.6.3 초기화 중…')
+  console.log('[MorningStock] Admin v2.9.6.4 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()

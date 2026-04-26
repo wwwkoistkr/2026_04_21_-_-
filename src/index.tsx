@@ -1128,7 +1128,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="toast-hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js?v=2.9.6.3"></script>
+      <script src="/static/admin.js?v=2.9.6.4"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )
@@ -3131,5 +3131,103 @@ app.get('/api/public/recipients', async (c) => {
 app.get('/api/health', (c) =>
   c.json({ ok: true, service: 'Morning Stock AI Briefing Center', version: 'v2.6.0' })
 )
+
+// ═════════════════════════════════════════════════════════════
+// (v2.9.6.4) 친절한 404 / 500 핸들러
+//   - 존재하지 않는 경로 접속 시 검은 화면 + "404 Not Found" 만 보이던 문제 개선
+//   - API 경로(/api/*)는 JSON 응답, 일반 페이지는 안내 화면 + 자동 리다이렉트
+// ═════════════════════════════════════════════════════════════
+app.notFound((c) => {
+  const path = c.req.path
+  // API 경로는 JSON 으로 응답
+  if (path.startsWith('/api/')) {
+    return c.json(
+      { ok: false, error: 'not_found', path, hint: '경로를 다시 확인해 주세요.' },
+      404,
+    )
+  }
+  // 일반 페이지는 친절한 안내 화면 + 5초 후 루트로 자동 이동
+  return c.html(
+    `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="refresh" content="5; url=/">
+  <title>페이지를 찾을 수 없습니다 · Morning Stock AI</title>
+  <link rel="icon" href="/static/icons/favicon-32.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 min-h-screen flex items-center justify-center p-4 text-white">
+  <div class="max-w-lg w-full bg-white/10 backdrop-blur-md rounded-2xl shadow-2xl p-6 sm:p-8 text-center border border-white/20">
+    <div class="text-6xl sm:text-7xl mb-3">🔍</div>
+    <h1 class="text-2xl sm:text-3xl font-bold mb-2">404 — 페이지를 찾을 수 없습니다</h1>
+    <p class="text-sm sm:text-base text-blue-100 mb-4">
+      요청하신 경로 <code class="bg-black/30 px-2 py-0.5 rounded text-yellow-200 break-all">${path.replace(/[<>&"']/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[ch] || ch))}</code> 은(는) 존재하지 않습니다.
+    </p>
+    <div class="bg-blue-500/20 border border-blue-400/40 rounded-lg p-3 text-xs sm:text-sm text-blue-50 mb-5 text-left">
+      <div class="font-semibold mb-1"><i class="fa-solid fa-circle-info mr-1"></i>가능한 원인</div>
+      <ul class="list-disc list-inside space-y-0.5">
+        <li>오타가 있거나 더 이상 사용되지 않는 경로</li>
+        <li>오래된 프리뷰 URL (예: <code class="text-yellow-200">xxxx.morning-stock-briefing.pages.dev</code>)</li>
+        <li>로그인 세션 만료 → 자동으로 로그인 화면으로 이동합니다</li>
+      </ul>
+    </div>
+    <div class="flex flex-col sm:flex-row gap-2 justify-center">
+      <a href="/" class="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-400 rounded-lg font-semibold transition">
+        <i class="fa-solid fa-house"></i> 홈으로 (5초 후 자동 이동)
+      </a>
+      <a href="/login" class="inline-flex items-center justify-center gap-2 px-4 py-2 bg-white/15 hover:bg-white/25 rounded-lg font-semibold transition">
+        <i class="fa-solid fa-right-to-bracket"></i> 로그인
+      </a>
+    </div>
+    <div class="mt-6 text-[11px] text-blue-200/70">
+      Morning Stock AI Briefing Center · v2.9.6.4
+    </div>
+  </div>
+</body>
+</html>`,
+    404,
+  )
+})
+
+app.onError((err, c) => {
+  console.error('[v2.9.6.4] Unhandled error:', err)
+  const path = c.req.path
+  if (path.startsWith('/api/')) {
+    return c.json(
+      { ok: false, error: 'internal_error', message: err.message || 'unknown error' },
+      500,
+    )
+  }
+  return c.html(
+    `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>일시적인 오류 · Morning Stock AI</title>
+  <link rel="icon" href="/static/icons/favicon-32.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gradient-to-br from-rose-900 via-slate-900 to-rose-900 min-h-screen flex items-center justify-center p-4 text-white">
+  <div class="max-w-lg w-full bg-white/10 backdrop-blur-md rounded-2xl shadow-2xl p-6 sm:p-8 text-center border border-white/20">
+    <div class="text-6xl mb-3">⚠️</div>
+    <h1 class="text-2xl sm:text-3xl font-bold mb-2">일시적인 오류가 발생했습니다</h1>
+    <p class="text-sm sm:text-base text-rose-100 mb-4">
+      잠시 후 다시 시도해 주세요. 문제가 지속되면 관리자에게 문의해 주세요.
+    </p>
+    <a href="/" class="inline-flex items-center justify-center gap-2 px-4 py-2 bg-rose-500 hover:bg-rose-400 rounded-lg font-semibold transition">
+      <i class="fa-solid fa-rotate-right"></i> 홈으로 돌아가기
+    </a>
+    <div class="mt-6 text-[11px] text-rose-200/70">v2.9.6.4</div>
+  </div>
+</body>
+</html>`,
+    500,
+  )
+})
 
 export default app
