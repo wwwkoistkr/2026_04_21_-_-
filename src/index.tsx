@@ -1128,7 +1128,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="toast-hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js?v=2.9.6.2"></script>
+      <script src="/static/admin.js?v=2.9.6.3"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )

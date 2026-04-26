@@ -2669,13 +2669,14 @@
     }, duration)
   }
 
-  // v2.9.6.2: 폼을 신규 입력 상태로 초기화 (오늘 날짜 + 점수/코멘트/약점 리셋)
+  // v2.9.6.3: 폼을 신규 입력 상태로 초기화 (오늘 날짜 + 점수/코멘트/약점 리셋)
   // - opts.dateOverride : 해당 날짜로 세팅, 아니면 오늘 KST
   // - opts.skipReload   : true 면 기존 점수 자동 로드를 건너뛰고 무조건 신규 폼 유지
   // - opts.scoreOverride: 슬라이더/숫자에 강제 세팅할 점수 (기본 80)
   // - opts.commentOverride : 코멘트 텍스트 (기본 빈 문자열)
   // - opts.weakAxesOverride: 체크할 약점 배열 (기본 [])
   // - opts.badgeMode   : 'new' | 'saved' (기본 'new')
+  // - opts.emptyInput  : true 면 숫자칸을 비우고 슬라이더는 중앙(50)에 두어 사용자가 바로 입력
   function resetUserScoreForm(opts) {
     // 하위호환: 예전 시그니처(dateOverride, skipReload) 지원
     if (typeof opts === 'string' || typeof opts === 'undefined') {
@@ -2688,20 +2689,28 @@
     const btnDelete = document.getElementById('btnUserScoreDelete')
     if (!dateEl || !slider || !numEl) return
 
+    const emptyInput = opts.emptyInput === true
     const score = (typeof opts.scoreOverride === 'number') ? opts.scoreOverride : 80
     const comment = (typeof opts.commentOverride === 'string') ? opts.commentOverride : ''
     const axes = Array.isArray(opts.weakAxesOverride) ? opts.weakAxesOverride : []
     const badge = opts.badgeMode || 'new'
 
-    // 1) 날짜 세팅 + change 이벤트 디스패치 (다른 리스너가 갱신되도록)
+    // 1) 날짜 세팅
     dateEl.value = opts.dateOverride || todayKstISO()
 
-    // 2) 점수: 슬라이더/숫자 양쪽에 동일하게 세팅 + input 이벤트 발사
-    //    (브라우저 시각 갱신 + 양방향 바인딩 리스너 트리거)
-    slider.value = score
-    numEl.value = score
-    try { slider.dispatchEvent(new Event('input', { bubbles: true })) } catch (_) {}
-    try { numEl.dispatchEvent(new Event('input', { bubbles: true })) } catch (_) {}
+    // 2) 점수 입력
+    if (emptyInput) {
+      // v2.9.6.3: 빈 입력 모드 — 숫자칸을 비워서 사용자가 바로 점수를 입력할 수 있게
+      //   슬라이더는 중앙값(50) 위치에 두지만 numEl은 ''
+      slider.value = 50
+      numEl.value = ''
+      try { slider.dispatchEvent(new Event('input', { bubbles: true })) } catch (_) {}
+    } else {
+      slider.value = score
+      numEl.value = score
+      try { slider.dispatchEvent(new Event('input', { bubbles: true })) } catch (_) {}
+      try { numEl.dispatchEvent(new Event('input', { bubbles: true })) } catch (_) {}
+    }
 
     // 3) 코멘트 / 약점
     if (commEl) commEl.value = comment
@@ -2745,11 +2754,15 @@
     }
     slider.addEventListener('input', () => { numEl.value = slider.value })
     numEl.addEventListener('input', () => {
+      // v2.9.6.3: 숫자칸이 빈 상태(신규 입력 직후)면 슬라이더 중앙 유지, 동기화 안 함
+      if (numEl.value === '') return
       const v = clamp(numEl.value)
       slider.value = v
       // 사용자가 직접 입력 중에는 강제 클램프하지 않고 blur 시점에만
     })
     numEl.addEventListener('blur', () => {
+      // v2.9.6.3: 비어 있는 채로 blur → 그대로 비어 있게 둠 (저장 시 검증)
+      if (numEl.value === '') return
       const v = clamp(numEl.value)
       numEl.value = v
       slider.value = v
@@ -2759,11 +2772,24 @@
     dateEl.addEventListener('change', loadExistingScore)
 
     btnSave.addEventListener('click', async () => {
-      const score = clamp(numEl.value)
+      // v2.9.6.3: 빈 입력 차단 — 신규 입력 모드에서 점수를 안 적고 저장 누르는 사고 방지
+      const rawNum = (numEl.value || '').trim()
+      if (rawNum === '') {
+        setUserScoreStatus('⚠️ 점수를 입력해 주세요 (0~100)', 'err')
+        showToast('점수를 입력해 주세요 (0~100)', 'err', 3000)
+        try { numEl.focus() } catch (_) {}
+        return
+      }
+
+      const score = clamp(rawNum)
       const comment = (document.getElementById('userScoreComment').value || '').slice(0, 500)
       const weakAxes = Array.from(document.querySelectorAll('.user-score-axis:checked'))
         .map(cb => cb.value)
       const date = ymdCompact(dateEl.value || todayKstISO())
+
+      // 저장 직전에 화면에도 클램프된 값 반영
+      numEl.value = score
+      slider.value = score
 
       btnSave.disabled = true
       setUserScoreStatus('저장 중…', 'info')
@@ -2798,68 +2824,53 @@
       loadUserScoreTrend()
     })
 
-    // v2.9.6.2: 🆕 신규 입력 버튼 — 항상 오늘 날짜로 이동, 점수는 자동 입력
-    //   - 오늘 점수 미저장 → 빈 폼(80점 기본값) + "신규 입력" 배지
-    //   - 오늘 점수 이미 저장됨 →
-    //       [확인] = 기존 점수를 폼에 자동 입력(수정 모드, "저장됨" 배지, 삭제 버튼 활성화)
-    //       [취소] = 빈 폼(80점)으로 새로 입력 시작 → 저장 시 기존 점수 덮어쓰기
+    // v2.9.6.3: 🆕 신규 입력 버튼 — 다이얼로그 없이 즉시 빈 입력란으로 진입
+    //   - 오늘 날짜 자동 세팅
+    //   - 숫자 입력칸을 비워서 사용자가 바로 점수를 타이핑할 수 있게
+    //   - 슬라이더는 중앙(50)에 두고, 숫자칸에 자동 포커스
+    //   - 오늘 점수가 이미 저장되어 있으면 안내 메시지로 알림 (저장 시 덮어쓰기)
     if (btnNew) {
       btnNew.addEventListener('click', async () => {
         const today = todayKstISO()
         const todayCompact = ymdCompact(today)
 
-        // 오늘 점수 조회
-        let existing = null
+        // 오늘 점수 사전 조회 (안내용 — 입력 흐름은 막지 않음)
+        let existingScore = null
         try {
           const res = await fetch(`/api/admin/user-score?date=${todayCompact}`, { credentials: 'same-origin' })
           const j = await res.json()
-          if (j && j.ok && j.exists && j.record) existing = j.record
-        } catch (_) { /* 네트워크 오류 시 빈 폼 진행 */ }
-
-        if (existing) {
-          // 오늘 이미 저장된 점수가 있을 때: 사용자에게 두 옵션 제공
-          const score = (typeof existing.score === 'number') ? existing.score : 80
-          const proceed = confirm(
-            `오늘(${ymdDashed(todayCompact)})은 이미 저장된 점수가 있습니다 (${score}점).\n\n` +
-            `[확인] = 기존 점수를 폼에 자동 입력 → 수정 모드\n` +
-            `[취소] = 빈 폼(80점)으로 새로 입력 → 저장 시 덮어쓰기`
-          )
-          if (proceed) {
-            // 수정 모드: 기존 점수 자동 입력
-            resetUserScoreForm({
-              dateOverride: today,
-              skipReload: true,
-              scoreOverride: score,
-              commentOverride: existing.comment || '',
-              weakAxesOverride: Array.isArray(existing.weakAxes) ? existing.weakAxes : [],
-              badgeMode: 'saved',
-            })
-            showToast(`📝 오늘 점수 불러옴 — ${score}점 (수정 모드)`, 'info')
-          } else {
-            // 빈 폼: 80점으로 새로 입력
-            resetUserScoreForm({
-              dateOverride: today,
-              skipReload: true,
-              scoreOverride: 80,
-              badgeMode: 'new',
-            })
-            showToast('🆕 신규 입력 모드 — 오늘 날짜, 80점으로 초기화', 'info')
+          if (j && j.ok && j.exists && j.record && typeof j.record.score === 'number') {
+            existingScore = j.record.score
           }
+        } catch (_) { /* 네트워크 오류 시 무시 */ }
+
+        // 빈 입력 폼 — 오늘 날짜 + 숫자칸 비움 + 슬라이더 중앙
+        resetUserScoreForm({
+          dateOverride: today,
+          skipReload: true,
+          emptyInput: true,
+          badgeMode: 'new',
+        })
+
+        // 안내 메시지
+        if (existingScore !== null) {
+          setUserScoreStatus(
+            `ℹ️ 오늘(${ymdDashed(todayCompact)}) 기존 점수 ${existingScore}점이 있습니다 — 새 점수를 입력 후 저장하면 덮어쓰기됩니다.`,
+            'info'
+          )
+          showToast(`🆕 오늘 신규 입력 — 기존 ${existingScore}점은 저장 시 덮어쓰기`, 'info', 3500)
         } else {
-          // 오늘 점수가 아직 없음 → 빈 폼
-          resetUserScoreForm({
-            dateOverride: today,
-            skipReload: true,
-            scoreOverride: 80,
-            badgeMode: 'new',
-          })
-          showToast('🆕 신규 입력 모드 — 오늘 날짜, 80점으로 시작', 'info')
+          showToast('🆕 오늘 신규 입력 — 점수를 입력하세요', 'info')
         }
 
-        // 상단 '오늘 사용자 점수' 카드도 갱신
+        // 상단 '오늘 사용자 점수' 카드 갱신
         try { loadUserScoreTrend() } catch (_) {}
-        // 첫 입력 필드(슬라이더)에 포커스
-        try { slider.focus() } catch (_) {}
+
+        // 숫자 입력칸에 자동 포커스 + 전체 선택 (사용자가 바로 타이핑하면 곧바로 점수 입력)
+        try {
+          numEl.focus()
+          numEl.select()
+        } catch (_) {}
       })
     }
 
@@ -3165,7 +3176,7 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.9.6.2 초기화 중…')
+  console.log('[MorningStock] Admin v2.9.6.3 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()
