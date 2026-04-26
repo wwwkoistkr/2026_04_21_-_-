@@ -2599,7 +2599,8 @@
   }
 
   // ═════════════════════════════════════════════════════════════
-  // v2.9.4 (2026-04-25): 사용자 점수 입력 + 7일 추이 + 금지어 통계
+  // v2.9.6 (2026-04-26): 사용자 점수 입력 — 상태 배지 + 삭제 + 토스트
+  // (v2.9.4: 사용자 점수 입력 + 7일 추이 + 금지어 통계)
   // ─────────────────────────────────────────────────────────────
   let userScoreChart = null
 
@@ -2624,12 +2625,57 @@
     el.textContent = msg
   }
 
+  /**
+   * v2.9.6: 상태 배지 — "✏️ 신규 입력" / "✅ 저장됨 (편집 가능)"
+   */
+  function setUserScoreBadge(state) {
+    const el = document.getElementById('userScoreBadge')
+    if (!el) return
+    el.classList.remove('hidden', 'bg-blue-100', 'text-blue-800', 'bg-emerald-100', 'text-emerald-800', 'bg-gray-100', 'text-gray-700')
+    if (state === 'saved') {
+      el.classList.add('bg-emerald-100', 'text-emerald-800')
+      el.innerHTML = '✅ 저장됨 (편집 가능 · 다시 저장하면 수정됩니다)'
+    } else if (state === 'new') {
+      el.classList.add('bg-blue-100', 'text-blue-800')
+      el.innerHTML = '✏️ 신규 입력 (이 날짜는 아직 미저장)'
+    } else {
+      el.classList.add('bg-gray-100', 'text-gray-700')
+      el.textContent = state || '대기 중'
+    }
+  }
+
+  /**
+   * v2.9.6: 토스트 알림 — 화면 우상단에 잠깐 떴다 사라지는 메시지.
+   * type: 'ok' (초록) | 'err' (빨강) | 'info' (파랑)
+   */
+  function showToast(msg, type = 'ok', duration = 2500) {
+    let host = document.getElementById('toast-host')
+    if (!host) {
+      host = document.createElement('div')
+      host.id = 'toast-host'
+      host.style.cssText = 'position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;'
+      document.body.appendChild(host)
+    }
+    const t = document.createElement('div')
+    const bg = type === 'err' ? '#dc2626' : (type === 'info' ? '#2563eb' : '#059669')
+    t.style.cssText = `background:${bg};color:#fff;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.18);opacity:0;transform:translateY(-8px);transition:all 220ms ease;pointer-events:auto;max-width:320px;`
+    t.textContent = msg
+    host.appendChild(t)
+    requestAnimationFrame(() => { t.style.opacity = '1'; t.style.transform = 'translateY(0)' })
+    setTimeout(() => {
+      t.style.opacity = '0'
+      t.style.transform = 'translateY(-8px)'
+      setTimeout(() => t.remove(), 240)
+    }, duration)
+  }
+
   function setupUserScoreForm() {
     const dateEl = document.getElementById('userScoreDate')
     const slider = document.getElementById('userScoreSlider')
     const numEl  = document.getElementById('userScoreNumber')
     const btnSave = document.getElementById('btnUserScoreSave')
     const btnReload = document.getElementById('btnUserScoreReload')
+    const btnDelete = document.getElementById('btnUserScoreDelete')
     if (!dateEl || !slider || !numEl) return
 
     // 기본값: 오늘
@@ -2674,12 +2720,18 @@
         })
         const j = await res.json()
         if (!res.ok || !j.ok) throw new Error(j.error || '저장 실패')
+        const verb = j.isUpdate ? '수정' : '신규 저장'
         setUserScoreStatus(
-          `✅ 저장 완료 (${j.isUpdate ? '수정' : '신규'}) — ${score}점`, 'ok'
+          `✅ 저장 완료 (${verb}) — ${score}점`, 'ok'
         )
+        showToast(`방금 ${verb}됨 · ${ymdDashed(date)} · ${score}점`, 'ok')
+        // v2.9.6: 저장 후 즉시 "저장됨" 배지로 전환 + 삭제 버튼 활성화
+        setUserScoreBadge('saved')
+        if (btnDelete) btnDelete.disabled = false
         await loadUserScoreTrend()
       } catch (e) {
         setUserScoreStatus('❌ ' + (e.message || e), 'err')
+        showToast('저장 실패: ' + (e.message || e), 'err', 4000)
       } finally {
         btnSave.disabled = false
       }
@@ -2689,12 +2741,51 @@
       loadExistingScore()
       loadUserScoreTrend()
     })
+
+    // v2.9.6: 삭제 버튼
+    if (btnDelete) {
+      btnDelete.addEventListener('click', async () => {
+        const date = ymdCompact(dateEl.value || todayKstISO())
+        const ok = confirm(`${ymdDashed(date)} 의 사용자 점수를 정말 삭제할까요?\n\n삭제 후에는 같은 날짜에 다시 신규 입력할 수 있습니다.`)
+        if (!ok) return
+        btnDelete.disabled = true
+        setUserScoreStatus('삭제 중…', 'info')
+        try {
+          const res = await fetch(`/api/admin/user-score?date=${date}`, {
+            method: 'DELETE',
+            credentials: 'same-origin',
+          })
+          const j = await res.json()
+          if (!res.ok || !j.ok) throw new Error(j.error || '삭제 실패')
+          if (j.deleted) {
+            showToast(`삭제됨 · ${ymdDashed(date)}`, 'ok')
+            setUserScoreStatus(`🗑 ${ymdDashed(date)} 점수 삭제 완료`, 'ok')
+          } else {
+            showToast(`해당 날짜에 점수가 없습니다`, 'info')
+            setUserScoreStatus(`해당 날짜에 저장된 점수가 없어 삭제할 게 없습니다`, 'info')
+          }
+          // 폼 리셋
+          slider.value = 80
+          numEl.value = 80
+          document.getElementById('userScoreComment').value = ''
+          document.querySelectorAll('.user-score-axis').forEach(cb => cb.checked = false)
+          setUserScoreBadge('new')
+          btnDelete.disabled = true
+          await loadUserScoreTrend()
+        } catch (e) {
+          setUserScoreStatus('❌ ' + (e.message || e), 'err')
+          showToast('삭제 실패: ' + (e.message || e), 'err', 4000)
+          btnDelete.disabled = false
+        }
+      })
+    }
   }
 
   async function loadExistingScore() {
     const dateEl = document.getElementById('userScoreDate')
     if (!dateEl) return
     const date = ymdCompact(dateEl.value || todayKstISO())
+    const btnDelete = document.getElementById('btnUserScoreDelete')
     try {
       const res = await fetch(`/api/admin/user-score?date=${date}`, { credentials: 'same-origin' })
       const j = await res.json()
@@ -2710,7 +2801,10 @@
         document.querySelectorAll('.user-score-axis').forEach(cb => {
           cb.checked = (j.record.weakAxes || []).includes(cb.value)
         })
-        setUserScoreStatus(`기존 점수 ${j.record.score}점 로드 (수정 후 다시 저장하세요)`, 'info')
+        setUserScoreStatus(`기존 점수 ${j.record.score}점 로드 — 수정 후 다시 저장하면 업데이트됩니다`, 'info')
+        // v2.9.6: 저장됨 배지 + 삭제 버튼 활성화
+        setUserScoreBadge('saved')
+        if (btnDelete) btnDelete.disabled = false
       } else {
         slider.value = 80
         numEl.value = 80
@@ -2718,6 +2812,9 @@
         document.querySelectorAll('.user-score-axis').forEach(cb => cb.checked = false)
         const el = document.getElementById('userScoreStatus')
         if (el) el.classList.add('hidden')
+        // v2.9.6: 신규 입력 배지 + 삭제 버튼 비활성화
+        setUserScoreBadge('new')
+        if (btnDelete) btnDelete.disabled = true
       }
     } catch (e) {
       console.warn('[user-score] 기존 점수 로드 실패:', e)
@@ -2941,7 +3038,7 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.9.4 초기화 중…')
+  console.log('[MorningStock] Admin v2.9.6 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()

@@ -769,7 +769,7 @@ app.get('/', (c) => {
           <div class="flex-shrink-0 text-3xl sm:text-4xl pt-1">📊</div>
           <div class="flex-1 min-w-0">
             <h2 class="text-base sm:text-lg font-bold text-gray-800">
-              오늘 받은 메일 품질 평가 <span class="text-xs font-normal text-gray-500">(v2.9.5)</span>
+              오늘 받은 메일 품질 평가 <span class="text-xs font-normal text-gray-500">(v2.9.6)</span>
             </h2>
             <p class="text-xs sm:text-sm text-gray-600 mt-1">
               0~100 점으로 직접 평가해 주세요. AI 자가점수와 비교해 1주일 후 시스템 개선 방향을 결정합니다.
@@ -834,14 +834,22 @@ app.get('/', (c) => {
                 class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 text-sm"></textarea>
             </div>
 
-            <div class="flex gap-2 mt-2">
+            {/* v2.9.6: 상태 배지 (신규 입력 / 저장됨) */}
+            <div id="userScoreBadge" class="hidden text-xs font-semibold px-2 py-1 rounded-full self-start"></div>
+
+            <div class="flex flex-wrap gap-2 mt-2">
               <button id="btnUserScoreSave"
-                class="touch-target flex-1 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-amber-600 hover:to-yellow-600 transition shadow-sm">
+                class="touch-target flex-1 min-w-[140px] px-4 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-amber-600 hover:to-yellow-600 transition shadow-sm">
                 <i class="fa-solid fa-floppy-disk mr-1"></i> 점수 저장
               </button>
-              <button id="btnUserScoreReload"
+              <button id="btnUserScoreReload" title="다시 불러오기"
                 class="touch-target px-3 py-2.5 bg-white border border-amber-300 text-amber-700 font-medium rounded-lg hover:bg-amber-50 transition">
                 <i class="fa-solid fa-rotate"></i>
+              </button>
+              {/* v2.9.6: 삭제 버튼 (저장된 기록만 활성화됨) */}
+              <button id="btnUserScoreDelete" title="이 날짜 점수 삭제" disabled
+                class="touch-target px-3 py-2.5 bg-white border border-red-300 text-red-600 font-medium rounded-lg hover:bg-red-50 transition disabled:opacity-40 disabled:cursor-not-allowed">
+                <i class="fa-solid fa-trash"></i>
               </button>
             </div>
             <div id="userScoreStatus" class="hidden text-sm p-2 rounded-lg"></div>
@@ -1115,7 +1123,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="toast-hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js?v=2.9.5"></script>
+      <script src="/static/admin.js?v=2.9.6"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )
@@ -1960,6 +1968,24 @@ app.get('/api/admin/user-score', async (c) => {
   } catch {
     return c.json({ ok: false, error: 'KV 파싱 실패' }, 500)
   }
+})
+
+/**
+ * v2.9.6: 사용자 점수 삭제.
+ * DELETE /api/admin/user-score?date=YYYYMMDD
+ *   date 파라미터 누락 시 오늘(KST) 기준.
+ *   존재하지 않으면 ok=true, deleted=false 로 응답 (idempotent).
+ */
+app.delete('/api/admin/user-score', async (c) => {
+  const date = (c.req.query('date') || '').match(/^\d{8}$/)
+    ? c.req.query('date')! : kstDateKey()
+  const key = KV_KEY_USER_SCORE_PFX + date
+  const existing = await c.env.SOURCES_KV.get(key)
+  if (!existing) {
+    return c.json({ ok: true, deleted: false, date })
+  }
+  await c.env.SOURCES_KV.delete(key)
+  return c.json({ ok: true, deleted: true, date })
 })
 
 /**

@@ -12,6 +12,14 @@
 Markdown 으로 작성된 AI 브리핑을 예쁜 HTML 로 변환해 첨부 없이 본문 송신합니다.
 
 === 버전 기록 ===
+v2.9.6 (2026-04-26): 컴팩트 한줄핵심(📌) + 3태그×3불릿 + 본문 -40% 폰트 다이어트
+  - 새 마크다운 파서: 📌 한줄핵심 + 💰/📈/🎯 헤딩 + "- " 불릿 리스트
+  - 본문 폰트 25px → 15px (-40%, 사용자 요청 -15%보다 컴팩트 우선)
+  - 한줄핵심 박스: 15.5px 굵게, 노란배경(#fef3c7) + 좌측 주황 보더(#f59e0b)
+  - 3태그 박스 색상 분리: 💰 파랑(#0ea5e9) / 📈 보라(#a855f7) / 🎯 노랑(#eab308)
+  - 카드 사이 그라데이션 구분선(시각적 플릿) 자동 삽입
+  - 모바일 미디어쿼리도 컴팩트 사이즈로 전면 재설정
+
 v2.9.1 (2026-04-24): 이메일 폭 1024px 확대 + 노란 박스 연동 + 미국 뉴스 누락 방지
   - 레이아웃 폭: 920px → 1024px (+11%, 데스크톱 가독성 극대화)
   - 노란 박스 (💡 투자 시사점): 폰트 27→24px(최적 밸런스), box-shadow 강화
@@ -155,9 +163,9 @@ _CATEGORY_COLORS = {
 def _category_badge_html(category: str) -> str:
     color = _CATEGORY_COLORS.get(category, _CATEGORY_COLORS["기타"])
     return (
-        f'<span style="display:inline-block;padding:3px 10px;border-radius:12px;'
-        f'background:{color};color:#fff;font-size:19px;font-weight:600;'
-        f'letter-spacing:.3px;">{category}</span>'
+        f'<span style="display:inline-block;padding:2px 8px;border-radius:10px;'
+        f'background:{color};color:#fff;font-size:12px;font-weight:600;'
+        f'letter-spacing:.2px;">{category}</span>'
     )
 
 
@@ -174,89 +182,165 @@ def _inline_md(text: str) -> str:
     return text
 
 
+def _render_bullets_html(bullets: list, color_text: str = "#0f172a") -> str:
+    """v2.9.6: 불릿 리스트를 컴팩트 HTML <ul> 로 렌더링.
+    각 라인 15px, 줄간격 1.55, 좌측 작은 도트, 굵은 숫자/종목코드는 인라인 마크다운 처리.
+    """
+    if not bullets:
+        return ""
+    items_html = "".join(
+        f'<li style="margin:4px 0;padding-left:2px;">{_inline_md(b)}</li>'
+        for b in bullets
+    )
+    return (
+        f'<ul class="card-bullets" style="margin:6px 0 4px 18px;padding:0;'
+        f'font-size:15px;line-height:1.55;color:{color_text};">'
+        f'{items_html}</ul>'
+    )
+
+
 def _render_news_card(item: dict) -> str:
-    """v2.5.0: 뉴스 1건을 카드형 HTML 로 렌더링."""
+    """v2.9.6: 컴팩트 한줄핵심(📌) + 3태그(💰📈🎯) × 3불릿 카드 HTML.
+
+    디자인 (v2.9.6 사용자 결정):
+      - 본문 15px (v2.9.1 기준 25px의 -40% 컴팩트화)
+      - 한줄핵심: 15.5px, 노란 배경(#fef3c7) + 굵게 + 왼쪽 주황(#f59e0b) 보더
+      - 3태그 박스 별도 색상: 💰 파란계 / 📈 보라계 / 🎯 노란계 (시각적 플릿)
+      - 카드 사이는 _md_to_html 에서 그라데이션 구분선 추가
+    """
     rank = item.get("rank", "")
     title = _inline_md(item.get("title", ""))
-    meta = item.get("meta", {})  # {출처, 카테고리, 요약, 투자 시사점, 원문 링크}
+    meta = item.get("meta", {})
 
     category = meta.get("카테고리", "기타")
     source = meta.get("출처", "")
-    summary = _inline_md(meta.get("요약", ""))
-    insight = _inline_md(meta.get("투자 시사점", ""))
+    headline = _inline_md(meta.get("한줄핵심", ""))
+    core_bullets = meta.get("핵심 현황 불릿", [])
+    outlook_bullets = meta.get("전망과 파급 불릿", [])
+    impl_bullets = meta.get("투자 시사점 불릿", [])
     link_html = _inline_md(meta.get("원문 링크", ""))
 
     category_badge = _category_badge_html(category)
     rank_badge = (
-        f'<span style="display:inline-block;width:28px;height:28px;line-height:28px;'
+        f'<span style="display:inline-block;width:24px;height:24px;line-height:24px;'
         f'border-radius:50%;background:linear-gradient(135deg,#1d4ed8,#0ea5e9);'
-        f'color:#fff;text-align:center;font-weight:700;font-size:22px;'
-        f'margin-right:10px;vertical-align:middle;">{rank}</span>'
+        f'color:#fff;text-align:center;font-weight:700;font-size:14px;'
+        f'margin-right:8px;vertical-align:middle;">{rank}</span>'
     )
+
+    # 한줄핵심 박스 — 노란 배경 + 왼쪽 주황 보더 + 굵게 (15.5px)
+    headline_html = ""
+    if headline:
+        headline_html = (
+            f'<div class="card-headline" style="background:#fef3c7;border-left:5px solid #f59e0b;'
+            f'padding:10px 14px;margin:10px 0 12px;border-radius:6px;'
+            f'font-size:15.5px;line-height:1.55;color:#78350f;font-weight:700;">'
+            f'<span style="color:#92400e;">📌 한줄핵심</span> &nbsp;{headline}'
+            f'</div>'
+        )
+
+    # 3태그 박스 (💰 파랑, 📈 보라, 🎯 노랑)
+    core_html = ""
+    if core_bullets:
+        core_html = (
+            f'<div class="card-tag-box" style="background:#f0f9ff;border-left:4px solid #0ea5e9;'
+            f'padding:8px 14px;margin:8px 0;border-radius:6px;">'
+            f'<div style="font-size:14px;font-weight:700;color:#0c4a6e;margin-bottom:2px;">'
+            f'💰 핵심 현황</div>'
+            f'{_render_bullets_html(core_bullets, "#0f172a")}'
+            f'</div>'
+        )
+
+    outlook_html = ""
+    if outlook_bullets:
+        outlook_html = (
+            f'<div class="card-tag-box" style="background:#faf5ff;border-left:4px solid #a855f7;'
+            f'padding:8px 14px;margin:8px 0;border-radius:6px;">'
+            f'<div style="font-size:14px;font-weight:700;color:#6b21a8;margin-bottom:2px;">'
+            f'📈 전망과 파급</div>'
+            f'{_render_bullets_html(outlook_bullets, "#1e1b4b")}'
+            f'</div>'
+        )
+
+    impl_html = ""
+    if impl_bullets:
+        impl_html = (
+            f'<div class="card-tag-box" style="background:#fefce8;border-left:5px solid #eab308;'
+            f'padding:8px 14px;margin:8px 0;border-radius:6px;'
+            f'box-shadow:0 1px 3px rgba(234,179,8,0.18);">'
+            f'<div style="font-size:14px;font-weight:700;color:#854d0e;margin-bottom:2px;">'
+            f'🎯 투자 시사점</div>'
+            f'{_render_bullets_html(impl_bullets, "#422006")}'
+            f'</div>'
+        )
 
     return f"""
 <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:10px;
-            padding:18px 20px;margin:14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
-  <div style="display:flex;align-items:center;margin-bottom:10px;">
+            padding:14px 18px;margin:10px 0;box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+  <div style="display:flex;align-items:center;margin-bottom:6px;">
     {rank_badge}{category_badge}
-    <span style="margin-left:auto;font-size:20px;color:#64748b;" class="src">📰 {source}</span>
+    <span style="margin-left:auto;font-size:13px;color:#64748b;" class="src">📰 {source}</span>
   </div>
-  <h3 class="card-title" style="margin:6px 0 12px;font-size:28px;font-weight:700;color:#0f172a;line-height:1.4;">
+  <h3 class="card-title" style="margin:4px 0 8px;font-size:17px;font-weight:700;color:#0f172a;line-height:1.35;">
     {title}
   </h3>
-  <div class="card-summary" style="background:#f0f9ff;border-left:6px solid #0ea5e9;padding:18px 22px;
-              margin:14px 0;border-radius:8px;font-size:25px;line-height:1.8;color:#0f172a;">
-    <strong style="color:#0c4a6e;">📊 요약</strong><br/>
-    {summary}
-  </div>
-  <div class="card-insight" style="background:#fef3c7;border-left:8px solid #f59e0b;padding:22px 26px;
-              margin:18px 0;border-radius:10px;font-size:24px;line-height:1.85;color:#78350f;
-              box-shadow:0 4px 12px rgba(245,158,11,0.25);">
-    <strong style="color:#92400e;">💡 투자 시사점</strong><br/>
-    {insight}
-  </div>
-  <div class="card-link" style="margin-top:14px;font-size:22px;">
+  {headline_html}
+  {core_html}
+  {outlook_html}
+  {impl_html}
+  <div class="card-link" style="margin-top:8px;font-size:13px;color:#475569;">
     🔗 {link_html}
   </div>
 </div>
+<!-- v2.9.6 카드 구분 그라데이션 플릿 -->
+<div style="height:3px;margin:6px 8px;border-radius:2px;
+            background:linear-gradient(90deg,transparent 0%,#e5e7eb 25%,#94a3b8 50%,#e5e7eb 75%,transparent 100%);"></div>
 """
 
 
 def _md_to_html(md: str) -> str:
     """
-    v2.5.0 카드형 변환기.
+    v2.9.6 카드형 변환기 — 컴팩트 한줄핵심(📌) + 3태그(💰📈🎯) × 3불릿 포맷.
 
-    2단계 파이프라인 출력 구조를 인식하여 카드로 변환:
+    파이프라인 출력 구조 (v2.9.6):
       ## 📈 헤더
       ### 1. 제목
-        - **카테고리**: ...
-        - **출처**: ...
-        - **요약**: ...
-        - **투자 시사점**: ...
-        - **원문 링크**: [...](...)
+        - **카테고리**: 반도체 · **출처**: WSJ
+        📌 **한줄핵심**: 30초 안에 핵심 파악 가능한 1문장.
+        💰 **핵심 현황**
+        - 사실1 + 숫자
+        - 사실2 + 숫자
+        - 사실3 + 숫자
+        📈 **전망과 파급**
+        - ...
+        🎯 **투자 시사점**
+        - ...
+        - **원문 링크**: [출처](url)
       ---
-      ### 2. 제목
-      ...
+      ### 2. ...
       ## 🔎 오늘의 한 줄 총평
       본문
 
-    섹션별로 다른 HTML 컴포넌트 렌더링.
-
-    v2.9.3: BRIEFING_SCORE HTML 주석 마커 사전 제거 (메일 본문에서는 보이지 않게).
+    v2.9.3: BRIEFING_SCORE HTML 주석 마커 사전 제거.
+    v2.9.6: 메타 라인을 한 줄에 두 키 표기 ("- **카테고리**: X · **출처**: Y") 가 가능하도록 분리 처리.
+            태그 헤딩 (💰/📈/🎯 **이름**) 다음에 오는 "- " 라인을 해당 태그의 불릿으로 수집.
     """
     # v2.9.3: 점수 메타 주석 제거 (이메일 본문에서는 노출 X)
     md = re.sub(r"<!--\s*BRIEFING_SCORE:[^>]*-->\s*", "", md)
     html_lines: List[str] = []
-    # 상태 머신: 현재 파싱 중인 뉴스 카드
     current_item: Optional[dict] = None
+    # v2.9.6: 현재 카드 안에서 어떤 태그 섹션의 불릿을 수집 중인지
+    #   None | "core" | "outlook" | "impl"
+    current_section: Optional[str] = None
     in_overview = False
     header_rendered = False
 
     def flush_item():
-        nonlocal current_item
+        nonlocal current_item, current_section
         if current_item is not None:
             html_lines.append(_render_news_card(current_item))
             current_item = None
+            current_section = None
 
     lines = md.splitlines()
     i = 0
@@ -283,22 +367,21 @@ def _md_to_html(md: str) -> str:
                 in_overview = True
                 html_lines.append(f"""
 <div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border-radius:10px;
-            padding:18px 22px;margin:24px 0 10px;">
-  <h2 class="overview-title" style="margin:0 0 12px;font-size:30px;color:#78350f;font-weight:700;">
+            padding:14px 18px;margin:18px 0 10px;">
+  <h2 class="overview-title" style="margin:0 0 8px;font-size:18px;color:#78350f;font-weight:700;">
     {_inline_md(content)}
   </h2>
 """)
             elif not header_rendered:
-                # 첫 H2 = 브리핑 타이틀
                 header_rendered = True
                 html_lines.append(
-                    f'<h2 class="brief-title" style="margin:0 0 12px;font-size:32px;color:#0f172a;'
+                    f'<h2 class="brief-title" style="margin:0 0 10px;font-size:19px;color:#0f172a;'
                     f'font-weight:700;border-bottom:2px solid #e5e7eb;'
-                    f'padding-bottom:10px;">{_inline_md(content)}</h2>'
+                    f'padding-bottom:8px;">{_inline_md(content)}</h2>'
                 )
             else:
                 html_lines.append(
-                    f'<h2 class="section-title" style="margin:22px 0 12px;font-size:28px;color:#0f172a;'
+                    f'<h2 class="section-title" style="margin:16px 0 10px;font-size:17px;color:#0f172a;'
                     f'font-weight:700;">{_inline_md(content)}</h2>'
                 )
             i += 1
@@ -312,37 +395,122 @@ def _md_to_html(md: str) -> str:
             current_item = {
                 "rank": h3.group(1),
                 "title": h3.group(2).strip(),
-                "meta": {},
+                "meta": {
+                    "핵심 현황 불릿": [],
+                    "전망과 파급 불릿": [],
+                    "투자 시사점 불릿": [],
+                },
             }
+            current_section = None
             i += 1
             continue
 
-        # 리스트 항목 "- **Key**: value" → 카드 메타 수집
+        # 카드 안에서 처리
         if current_item is not None:
+            # v2.9.6: 카테고리·출처 한 줄 메타 ("- **카테고리**: X · **출처**: Y" or 분리형)
+            #   1) 한 줄에 두 키 — 분리해서 모두 저장
+            combo = re.match(
+                r"^\s*[-*]\s+\*\*카테고리\*\*\s*:\s*(.+?)\s*[·•]\s*\*\*출처\*\*\s*:\s*(.+)$",
+                line,
+            )
+            if combo:
+                current_item["meta"]["카테고리"] = combo.group(1).strip()
+                current_item["meta"]["출처"] = combo.group(2).strip()
+                i += 1
+                continue
+
+            # 원문 링크 라인 (일반 메타로 저장)
+            link_meta = re.match(
+                r"^\s*[-*]\s+\*\*원문 링크\*\*\s*:\s*(.*)$", line,
+            )
+            if link_meta:
+                current_item["meta"]["원문 링크"] = link_meta.group(1).strip()
+                # 원문 링크는 카드 종료 직전 메타이므로 섹션 종료
+                current_section = None
+                i += 1
+                continue
+
+            # v2.9.6: 한줄핵심 라인 ("📌 **한줄핵심**: ...")
+            headline_match = re.match(r"^📌\s*\*\*한줄핵심\*\*\s*:\s*(.*)$", line)
+            if headline_match:
+                val = headline_match.group(1).strip()
+                # 다음 줄이 같은 내용 이어쓰기인 경우(드뭄)
+                j = i + 1
+                while j < len(lines):
+                    nxt = lines[j].rstrip()
+                    if not nxt.strip():
+                        break
+                    # 다음 라인이 새로운 태그/메타/카드/구분이면 종료
+                    if (
+                        nxt.lstrip().startswith(("- ", "* ", "• "))
+                        or re.match(r"^[#📌💰📈🎯]", nxt.strip())
+                    ):
+                        break
+                    val += " " + nxt.strip()
+                    j += 1
+                current_item["meta"]["한줄핵심"] = val
+                current_section = None
+                i = j
+                continue
+
+            # v2.9.6: 태그 헤딩 (💰/📈/🎯 **이름** [추가내용 무시])
+            tag_match = re.match(r"^(💰|📈|🎯)\s*\*\*([^*]+)\*\*", line)
+            if tag_match:
+                emoji = tag_match.group(1)
+                if emoji == "💰":
+                    current_section = "core"
+                elif emoji == "📈":
+                    current_section = "outlook"
+                elif emoji == "🎯":
+                    current_section = "impl"
+                # 같은 줄에 본문 콜론(:) 형태로 이어진 경우(서술형 폴백 호환)
+                same_line_body = line[tag_match.end():].lstrip()
+                if same_line_body.startswith(":"):
+                    body = same_line_body[1:].strip()
+                    if body and current_section:
+                        # 서술형 한 문단을 단일 불릿으로 저장 (60자 초과 시 잘라서 2개로)
+                        sec_key = {
+                            "core": "핵심 현황 불릿",
+                            "outlook": "전망과 파급 불릿",
+                            "impl": "투자 시사점 불릿",
+                        }[current_section]
+                        # 90자 단위로 분할 (서술형 폴백 호환)
+                        chunks = [body[k:k+90] for k in range(0, len(body), 90)]
+                        for ch in chunks[:3]:
+                            if ch.strip():
+                                current_item["meta"][sec_key].append(ch.strip())
+                i += 1
+                continue
+
+            # v2.9.6: 태그 섹션 안의 불릿 수집
+            if current_section is not None:
+                bullet = re.match(r"^\s*[-*•]\s+(.+)$", line)
+                if bullet:
+                    val = bullet.group(1).strip()
+                    sec_key = {
+                        "core": "핵심 현황 불릿",
+                        "outlook": "전망과 파급 불릿",
+                        "impl": "투자 시사점 불릿",
+                    }[current_section]
+                    current_item["meta"][sec_key].append(val)
+                    i += 1
+                    continue
+
+            # 기타 메타 ("- **Key**: value")
             meta_match = re.match(
                 r"^\s*[-*]\s+\*\*([^*]+?)\*\*\s*:\s*(.*)", line,
             )
             if meta_match:
                 key = meta_match.group(1).strip()
                 val = meta_match.group(2).strip()
-                # 여러 줄 이어진 내용 지원 (다음 줄이 들여쓰기/목록 아님)
-                j = i + 1
-                while j < len(lines):
-                    nxt = lines[j].rstrip()
-                    if not nxt.strip():
-                        break
-                    if re.match(r"^\s*[-*]\s+", nxt) or re.match(r"^#", nxt):
-                        break
-                    val += " " + nxt.strip()
-                    j += 1
                 current_item["meta"][key] = val
-                i = j
+                i += 1
                 continue
 
         # 총평 섹션 본문
         if in_overview:
             html_lines.append(
-                f'<p class="overview-line" style="margin:6px 0;font-size:26px;line-height:1.85;color:#78350f;">'
+                f'<p class="overview-line" style="margin:4px 0;font-size:15px;line-height:1.6;color:#78350f;">'
                 f'{_inline_md(line)}</p>'
             )
             i += 1
@@ -351,7 +519,7 @@ def _md_to_html(md: str) -> str:
         # 기타 일반 텍스트 (인트로 문단 등)
         flush_item()
         html_lines.append(
-            f'<p class="intro-p" style="margin:10px 0;font-size:24px;line-height:1.8;color:#475569;">'
+            f'<p class="intro-p" style="margin:8px 0;font-size:15px;line-height:1.65;color:#475569;">'
             f'{_inline_md(line)}</p>'
         )
         i += 1
@@ -389,37 +557,38 @@ HTML_TEMPLATE = """\
       image-rendering: crisp-edges;
       -ms-interpolation-mode: bicubic;
     }}
-    /* v2.9.1: 모바일 반응형 ( 480px 이하 ) - 폰트 자동 축소 + 패딩 최적화 */
+    /* v2.9.6: 컴팩트 카드 — 모바일 반응형 ( 480px 이하 ) */
     @media only screen and (max-width: 480px) {{
       table[width="1024"] {{ width: 100% !important; max-width: 100% !important; }}
-      .hdr-title   {{ font-size: 30px !important; }}
-      .hdr-date    {{ font-size: 19px !important; }}
-      .hdr-kicker  {{ font-size: 15px !important; }}
-      .hdr-meta    {{ font-size: 15px !important; }}
-      .brief-title {{ font-size: 24px !important; }}
-      .section-title {{ font-size: 22px !important; }}
-      .overview-title {{ font-size: 23px !important; }}
-      .overview-line  {{ font-size: 19px !important; line-height: 1.75 !important; }}
-      .card-title   {{ font-size: 21px !important; line-height: 1.4 !important; }}
-      .card-summary {{ font-size: 18px !important; line-height: 1.7 !important; padding: 12px 14px !important; border-left-width: 4px !important; }}
-      .card-insight {{ font-size: 18px !important; line-height: 1.7 !important; padding: 14px 16px !important; border-left-width: 5px !important; margin: 12px 0 !important; }}
-      .card-link    {{ font-size: 17px !important; }}
-      .src          {{ font-size: 15px !important; }}
-      .intro-p      {{ font-size: 18px !important; line-height: 1.7 !important; }}
-      .footer       {{ font-size: 15px !important; padding: 18px 16px 20px !important; }}
+      .hdr-title   {{ font-size: 22px !important; }}
+      .hdr-date    {{ font-size: 14px !important; }}
+      .hdr-kicker  {{ font-size: 11px !important; }}
+      .hdr-meta    {{ font-size: 12px !important; }}
+      .brief-title {{ font-size: 17px !important; }}
+      .section-title {{ font-size: 15px !important; }}
+      .overview-title {{ font-size: 16px !important; }}
+      .overview-line  {{ font-size: 13px !important; line-height: 1.55 !important; }}
+      .card-title   {{ font-size: 15px !important; line-height: 1.35 !important; }}
+      .card-headline {{ font-size: 14.5px !important; padding: 8px 11px !important; }}
+      .card-tag-box {{ padding: 7px 11px !important; }}
+      .card-bullets {{ font-size: 13.5px !important; line-height: 1.55 !important; }}
+      .card-link    {{ font-size: 12px !important; }}
+      .src          {{ font-size: 11px !important; }}
+      .intro-p      {{ font-size: 13.5px !important; line-height: 1.6 !important; }}
+      .footer       {{ font-size: 12px !important; padding: 14px 14px 18px !important; }}
     }}
-    /* v2.9.1: 중형 모바일/태블릿 ( 481~768px ) */
+    /* v2.9.6: 중형 모바일/태블릿 ( 481~768px ) */
     @media only screen and (min-width: 481px) and (max-width: 768px) {{
       table[width="1024"] {{ width: 100% !important; max-width: 100% !important; }}
-      .hdr-title   {{ font-size: 34px !important; }}
-      .brief-title {{ font-size: 28px !important; }}
-      .section-title {{ font-size: 24px !important; }}
-      .card-title   {{ font-size: 24px !important; }}
-      .card-summary {{ font-size: 21px !important; padding: 15px 18px !important; }}
-      .card-insight {{ font-size: 21px !important; padding: 15px 18px !important; }}
-      .overview-line {{ font-size: 22px !important; }}
-      .intro-p      {{ font-size: 20px !important; }}
-      .footer       {{ font-size: 17px !important; }}
+      .hdr-title   {{ font-size: 26px !important; }}
+      .brief-title {{ font-size: 18px !important; }}
+      .section-title {{ font-size: 16px !important; }}
+      .card-title   {{ font-size: 16px !important; }}
+      .card-headline {{ font-size: 15px !important; }}
+      .card-bullets {{ font-size: 14.5px !important; }}
+      .overview-line {{ font-size: 14.5px !important; }}
+      .intro-p      {{ font-size: 14.5px !important; }}
+      .footer       {{ font-size: 13px !important; }}
     }}
     /* v2.9.1: 대형 태블릿 ( 769~1024px ) — 카드 폭 100% 활용 */
     @media only screen and (min-width: 769px) and (max-width: 1024px) {{
@@ -433,35 +602,35 @@ HTML_TEMPLATE = """\
       <td align="center">
         <table role="presentation" width="1024" cellpadding="0" cellspacing="0" style="max-width:1024px;width:100%;">
 
-          <!-- 헤더 카드 -->
+          <!-- v2.9.6 헤더 카드 (컴팩트) -->
           <tr><td>
             <div style="background:linear-gradient(135deg,#1d4ed8 0%,#0ea5e9 50%,#06b6d4 100%);
-                        border-radius:14px 14px 0 0;padding:28px 32px;color:#fff;
+                        border-radius:12px 12px 0 0;padding:18px 22px;color:#fff;
                         box-shadow:0 4px 12px rgba(0,0,0,0.08);">
-              <div class="hdr-kicker" style="font-size:19px;opacity:.85;letter-spacing:2px;font-weight:600;">
+              <div class="hdr-kicker" style="font-size:12px;opacity:.85;letter-spacing:1.5px;font-weight:600;">
                 MORNING STOCK AI · DAILY BRIEFING
               </div>
-              <div class="hdr-title" style="font-size:40px;font-weight:700;margin-top:10px;line-height:1.25;">
+              <div class="hdr-title" style="font-size:26px;font-weight:700;margin-top:6px;line-height:1.25;">
                 🌅 Morning Stock AI Briefing Center
               </div>
-              <div class="hdr-date" style="font-size:24px;margin-top:8px;opacity:.95;">
+              <div class="hdr-date" style="font-size:15px;margin-top:6px;opacity:.95;">
                 {today} · 주식·반도체 일일 브리핑
               </div>
-              <div class="hdr-meta" style="font-size:19px;margin-top:16px;opacity:.85;border-top:1px solid rgba(255,255,255,.2);
-                          padding-top:12px;line-height:1.55;">
+              <div class="hdr-meta" style="font-size:13px;margin-top:10px;opacity:.85;border-top:1px solid rgba(255,255,255,.2);
+                          padding-top:8px;line-height:1.55;">
                 📊 {meta_summary}
               </div>
             </div>
           </td></tr>
 
           <!-- 본문 카드 -->
-          <tr><td style="background:#ffffff;padding:20px 28px;box-shadow:0 4px 12px rgba(0,0,0,0.04);">
+          <tr><td style="background:#ffffff;padding:14px 18px;box-shadow:0 4px 12px rgba(0,0,0,0.04);">
             {body}
           </td></tr>
 
-          <!-- 푸터 -->
-          <tr><td class="footer" style="background:#f8fafc;padding:22px 28px 26px;border-radius:0 0 14px 14px;
-                         border-top:1px solid #e2e8f0;font-size:20px;color:#64748b;line-height:1.65;
+          <!-- v2.9.6 푸터 (컴팩트) -->
+          <tr><td class="footer" style="background:#f8fafc;padding:14px 18px 18px;border-radius:0 0 12px 12px;
+                         border-top:1px solid #e2e8f0;font-size:13px;color:#64748b;line-height:1.55;
                          box-shadow:0 4px 12px rgba(0,0,0,0.04);">
             <div style="margin-bottom:8px;">
               📌 <strong>이 메일은 매일 오전 6시 30분(KST) GitHub Actions 에 의해 자동 발송됩니다.</strong>
