@@ -2669,6 +2669,32 @@
     }, duration)
   }
 
+  // v2.9.6.1: 폼을 신규 입력 상태로 초기화 (오늘 날짜 + 기본값 80점 + 약점 미체크)
+  // - dateOverride 가 주어지면 해당 날짜로 세팅, 아니면 오늘 KST
+  // - skipReload=true 면 기존 점수 자동 로드를 건너뛰고 무조건 신규 폼 유지
+  function resetUserScoreForm(dateOverride, skipReload) {
+    const dateEl = document.getElementById('userScoreDate')
+    const slider = document.getElementById('userScoreSlider')
+    const numEl  = document.getElementById('userScoreNumber')
+    const commEl = document.getElementById('userScoreComment')
+    const btnDelete = document.getElementById('btnUserScoreDelete')
+    if (!dateEl || !slider || !numEl) return
+    dateEl.value = dateOverride || todayKstISO()
+    slider.value = 80
+    numEl.value = 80
+    if (commEl) commEl.value = ''
+    document.querySelectorAll('.user-score-axis').forEach(cb => cb.checked = false)
+    setUserScoreBadge('new')
+    if (btnDelete) btnDelete.disabled = true
+    const statusEl = document.getElementById('userScoreStatus')
+    if (statusEl) statusEl.classList.add('hidden')
+    if (!skipReload) {
+      // 사용자가 일부러 신규 입력 버튼을 누른 게 아니라면(예: 페이지 첫 로드)
+      // 해당 날짜에 저장된 점수가 있으면 자동 로드
+      loadExistingScore()
+    }
+  }
+
   function setupUserScoreForm() {
     const dateEl = document.getElementById('userScoreDate')
     const slider = document.getElementById('userScoreSlider')
@@ -2676,6 +2702,7 @@
     const btnSave = document.getElementById('btnUserScoreSave')
     const btnReload = document.getElementById('btnUserScoreReload')
     const btnDelete = document.getElementById('btnUserScoreDelete')
+    const btnNew = document.getElementById('btnUserScoreNew')  // v2.9.6.1
     if (!dateEl || !slider || !numEl) return
 
     // 기본값: 오늘
@@ -2741,6 +2768,36 @@
       loadExistingScore()
       loadUserScoreTrend()
     })
+
+    // v2.9.6.1: 🆕 신규 입력 버튼 — 폼 비우고 오늘 날짜로 신규 모드 진입
+    if (btnNew) {
+      btnNew.addEventListener('click', async () => {
+        const today = todayKstISO()
+        const todayCompact = ymdCompact(today)
+        // 오늘 날짜에 이미 저장된 점수가 있으면 사용자에게 알림
+        let existsToday = false
+        try {
+          const res = await fetch(`/api/admin/user-score?date=${todayCompact}`, { credentials: 'same-origin' })
+          const j = await res.json()
+          existsToday = !!(j && j.exists)
+        } catch (_) { /* 무시 */ }
+
+        if (existsToday) {
+          const proceed = confirm(
+            `오늘(${ymdDashed(todayCompact)})은 이미 저장된 점수가 있습니다.\n\n` +
+            `[확인] = 폼을 비우고 새로 입력 → 저장 시 기존 점수를 덮어쓰기(수정)\n` +
+            `[취소] = 기존 점수 그대로 유지`
+          )
+          if (!proceed) return
+        }
+
+        // 폼 전체 초기화 (skipReload=true 로 자동 로드 차단)
+        resetUserScoreForm(today, true)
+        showToast('🆕 신규 입력 모드 — 오늘 날짜로 초기화됨', 'info')
+        // 첫 입력 필드(슬라이더)에 포커스
+        try { slider.focus() } catch (_) {}
+      })
+    }
 
     // v2.9.6: 삭제 버튼
     if (btnDelete) {
@@ -3038,7 +3095,7 @@
   // ═════════════════════════════════════════════════════════════
   // 실행
   // ═════════════════════════════════════════════════════════════
-  console.log('[MorningStock] Admin v2.9.6 초기화 중…')
+  console.log('[MorningStock] Admin v2.9.6.1 초기화 중…')
   setupTabs()
   setupGlobalEvents()
   setupTriggerButtons()

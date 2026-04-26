@@ -838,11 +838,16 @@ app.get('/', (c) => {
             <div id="userScoreBadge" class="hidden text-xs font-semibold px-2 py-1 rounded-full self-start"></div>
 
             <div class="flex flex-wrap gap-2 mt-2">
+              {/* v2.9.6.1: 🆕 신규 입력 — 폼 전체 초기화 + 오늘 날짜로 세팅 */}
+              <button id="btnUserScoreNew" title="폼을 비우고 오늘 날짜로 새로 입력 시작"
+                class="touch-target px-4 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-semibold rounded-lg hover:from-blue-600 hover:to-indigo-600 transition shadow-sm">
+                <i class="fa-solid fa-plus mr-1"></i> 🆕 신규 입력
+              </button>
               <button id="btnUserScoreSave"
                 class="touch-target flex-1 min-w-[140px] px-4 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-amber-600 hover:to-yellow-600 transition shadow-sm">
                 <i class="fa-solid fa-floppy-disk mr-1"></i> 점수 저장
               </button>
-              <button id="btnUserScoreReload" title="다시 불러오기"
+              <button id="btnUserScoreReload" title="현재 날짜 점수 다시 불러오기"
                 class="touch-target px-3 py-2.5 bg-white border border-amber-300 text-amber-700 font-medium rounded-lg hover:bg-amber-50 transition">
                 <i class="fa-solid fa-rotate"></i>
               </button>
@@ -1123,7 +1128,7 @@ app.get('/', (c) => {
       {/* 토스트 알림 — 모바일은 하단 중앙 */}
       <div id="toast" class="toast-hidden fixed bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:right-6 sm:translate-x-0 z-50 px-5 py-3 rounded-lg shadow-lg text-white text-sm max-w-[90vw] sm:max-w-md"></div>
 
-      <script src="/static/admin.js?v=2.9.6"></script>
+      <script src="/static/admin.js?v=2.9.6.1"></script>
     </div>,
     { title: 'Morning Stock AI Briefing Center' }
   )
