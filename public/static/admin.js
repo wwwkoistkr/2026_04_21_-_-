@@ -1408,10 +1408,14 @@
     el.classList.remove('hidden')
   }
 
+  // v2.9.9: trigger-status에서 가져온 repo 정보 (타임아웃 링크용)
+  let triggerRepoName = ''
+
   async function checkTriggerConfig() {
     try {
       const s = await triggerApi.status()
       cooldownState.configured = !!s.configured
+      if (s.repo) triggerRepoName = s.repo
       if (!s.configured) {
         showTriggerStatus(
           'bg-amber-50 border border-amber-200 text-amber-800',
@@ -1714,8 +1718,19 @@
 
     const actionText = dryRun ? 'DRY RUN (메일 발송 없이 프리뷰만 생성)' : '실제 브리핑 발송'
     const confirmBody = dryRun
-      ? '수집·AI요약만 수행하고 <strong>메일은 보내지 않습니다</strong>.<br>결과는 GitHub Actions 페이지의 artifact 로 다운로드 가능합니다.<br><span class="text-xs text-gray-500">⏱️ 쿨다운: 30초 (테스트 빠른 반복용)</span>'
-      : '지금 즉시 <strong>모든 활성 수신자에게 메일</strong>이 발송됩니다.<br>약 1~3분 소요되며, <strong>5분 쿨다운</strong>이 적용됩니다.<br><span class="text-xs text-amber-600">⚠️ 수신자 스팸 처리 방지를 위해 과도한 반복 발송은 피하세요.</span>'
+      ? '수집·AI요약만 수행하고 <strong>메일은 보내지 않습니다</strong>.<br>결과는 GitHub Actions 페이지의 artifact 로 다운로드 가능합니다.' +
+        '<div class="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">' +
+          '<i class="fa-solid fa-clock mr-1"></i><strong>예상 소요 시간: 약 4~7분</strong>' +
+          '<div class="mt-1 text-[11px] text-blue-500">환경 셋업(1분) → 뉴스 수집(1~2분) → <strong>AI 요약(2~3분, 병목)</strong></div>' +
+          '<div class="mt-0.5 text-[10px] text-gray-400">쿨다운: 30초 (테스트 빠른 반복용)</div>' +
+        '</div>'
+      : '지금 즉시 <strong>모든 활성 수신자에게 메일</strong>이 발송됩니다.' +
+        '<div class="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">' +
+          '<i class="fa-solid fa-clock mr-1"></i><strong>예상 소요 시간: 약 5~8분</strong>' +
+          '<div class="mt-1 text-[11px] text-blue-500">환경 셋업 → 뉴스 수집 → <strong>AI 요약(병목)</strong> → 이메일 발송</div>' +
+          '<div class="mt-0.5 text-[10px] text-gray-400">5분 쿨다운 적용 | AI 요약 단계가 가장 오래 걸립니다</div>' +
+        '</div>' +
+        '<div class="mt-1 text-xs text-amber-600"><i class="fa-solid fa-triangle-exclamation mr-1"></i>수신자 스팸 처리 방지를 위해 과도한 반복 발송은 피하세요.</div>'
 
     showConfirm(
       actionText + ' 실행',
@@ -1798,15 +1813,15 @@
       refreshCooldownState()
     }
 
-    // v2.9.8: 진행 단계 예측 (예상 타임라인)
+    // v2.9.9: 진행 단계 예측 (딜레이 3초 기준 재산정)
     const stageEstimates = [
-      { name: '큐 대기', endSec: 30 },
-      { name: '환경 셋업', endSec: 90 },
-      { name: '뉴스 수집', endSec: 180 },
-      { name: 'AI 요약 (병목)', endSec: 360 },
-      { name: '이메일 발송', endSec: 420 },
+      { name: '큐 대기', endSec: 20, icon: '⏳' },
+      { name: '환경 셋업', endSec: 70, icon: '📦' },
+      { name: '뉴스 수집', endSec: 140, icon: '📰' },
+      { name: 'AI 요약 (병목)', endSec: 320, icon: '🤖' },
+      { name: '이메일 발송', endSec: 360, icon: '✉️' },
     ]
-    const totalEstSec = 420 // 예상 총 시간 (7분)
+    const totalEstSec = 360 // 예상 총 시간 (6분, 딜레이 3초 기준)
 
     function fmtElapsed(s) {
       const m = Math.floor(s / 60)
@@ -1817,16 +1832,34 @@
     function guessStage(sec) {
       for (let i = stageEstimates.length - 1; i >= 0; i--) {
         if (sec < stageEstimates[i].endSec) continue
-        return stageEstimates[i].name
+        return stageEstimates[i]
       }
-      return stageEstimates[0].name
+      return stageEstimates[0]
     }
 
     function progressBar(sec) {
       const pct = Math.min(100, Math.round((sec / totalEstSec) * 100))
-      return `<div class="w-full bg-blue-100 rounded-full h-2 mt-2 overflow-hidden">` +
-        `<div class="bg-blue-500 h-2 rounded-full transition-all duration-700" style="width:${pct}%"></div></div>` +
-        `<div class="text-[10px] text-blue-500 mt-1 text-right">${pct}% (예상)</div>`
+      // v2.9.9: 단계별 세그먼트 프로그레스 바
+      const segHtml = stageEstimates.map((s, i) => {
+        const prevEnd = i === 0 ? 0 : stageEstimates[i - 1].endSec
+        const segPct = ((s.endSec - prevEnd) / totalEstSec * 100).toFixed(1)
+        const done = sec >= s.endSec
+        const active = sec >= prevEnd && sec < s.endSec
+        const bg = done ? 'bg-green-400' : active ? 'bg-blue-500 animate-pulse' : 'bg-gray-200'
+        return `<div class="${bg} h-full transition-all duration-700" style="width:${segPct}%" title="${s.icon} ${s.name}"></div>`
+      }).join('')
+      const icons = stageEstimates.map(s => {
+        const prevEnd = stageEstimates[stageEstimates.indexOf(s) - 1]?.endSec || 0
+        const active = sec >= prevEnd && sec < s.endSec
+        const done = sec >= s.endSec
+        return `<span class="${done ? 'opacity-50' : active ? 'font-bold text-blue-700' : 'text-gray-300'}" title="${s.name}">${s.icon}</span>`
+      }).join(' ')
+      const remainEst = Math.max(0, totalEstSec - sec)
+      return `<div class="w-full bg-gray-100 rounded-full h-2.5 mt-2 overflow-hidden flex">${segHtml}</div>` +
+        `<div class="flex justify-between items-center mt-1">` +
+          `<div class="text-[10px]">${icons}</div>` +
+          `<div class="text-[10px] text-blue-500">${pct}% · 남은 ~${fmtElapsed(remainEst)}</div>` +
+        `</div>`
     }
 
     triggerPollTimer = setInterval(async () => {
@@ -1836,15 +1869,18 @@
         showTriggerStatus(
           'bg-amber-50 border border-amber-200 text-amber-800',
           '<i class="fa-solid fa-triangle-exclamation mr-1"></i>' +
-            `<strong>폴링 타임아웃 (${fmtElapsed(elapsed)})</strong> — 워크플로우가 아직 실행 중일 수 있습니다.` +
+            `<strong>폴링 시간 초과 (${fmtElapsed(elapsed)})</strong> — 워크플로우가 아직 실행 중일 수 있습니다.` +
             `<div class="text-xs mt-1.5 opacity-90">` +
-              `💡 일반적으로 4~8분이 소요됩니다. AI 요약 단계가 가장 오래 걸립니다.<br>` +
-              `아래 버튼으로 직접 확인하거나, 잠시 후 새로고침해 주세요.` +
+              `⏱️ 예상 소요 4~7분 | AI 요약(15건×3초) 단계에서 대부분의 시간이 소요됩니다.<br>` +
+              `아래 <strong>상태 재확인</strong> 버튼으로 완료 여부를 확인하세요.` +
             `</div>` +
             `<div class="flex gap-2 mt-2">` +
-              `<button onclick="document.getElementById('btnCheckStatus').click()" ` +
+              `<button onclick="document.getElementById('btnCheckTriggerStatus').click()" ` +
                 `class="px-3 py-1 bg-amber-500 text-white text-xs rounded hover:bg-amber-600 transition">` +
                 `<i class="fa-solid fa-rotate mr-1"></i>상태 재확인</button>` +
+              `<a href="https://github.com/${triggerRepoName || 'your-repo'}/actions" target="_blank" ` +
+                `class="px-3 py-1 bg-white border border-amber-300 text-amber-700 text-xs rounded hover:bg-amber-50 transition">` +
+                `<i class="fa-brands fa-github mr-1"></i>GitHub Actions 확인</a>` +
             `</div>`
         )
         release()
@@ -1902,14 +1938,14 @@
         const statusKo =
           match.status === 'queued' ? '큐 대기 중' :
           match.status === 'in_progress' ? '실행 중' : match.status
-        const curStage = match.status === 'in_progress' ? guessStage(elapsed) : '큐 대기'
+        const stg = match.status === 'in_progress' ? guessStage(elapsed) : { name: '큐 대기', icon: '⏳' }
         showTriggerStatus(
           'bg-blue-50 border border-blue-200 text-blue-800',
           `<i class="fa-solid fa-spinner fa-spin mr-1"></i>워크플로 <strong>${statusKo}</strong> — ` +
-          `<span class="font-semibold">${curStage}</span> 추정 (${fmtElapsed(elapsed)} 경과)` +
+          `<span class="font-semibold">${stg.icon || ''} ${stg.name}</span> 추정 (${fmtElapsed(elapsed)} 경과)` +
           `<a href="${match.html_url}" target="_blank" class="underline ml-2 text-xs">실시간 로그</a>` +
           progressBar(elapsed) +
-          `<div class="text-[10px] text-blue-400 mt-0.5">💡 AI 요약 단계가 가장 오래 걸립니다 (보통 4~8분 소요)</div>`
+          `<div class="text-[10px] text-blue-400 mt-0.5">💡 예상 총 소요 4~7분 — AI 요약 단계(15건×3초)가 가장 오래 걸립니다</div>`
         )
       }
     }, 10000)

@@ -166,11 +166,13 @@ ALLOWED_CATEGORIES = ("반도체", "원자력")
 #
 # 환경 변수
 #   SUMMARY_MODE               : "sequential" | "parallel" (기본 sequential)
-#   SUMMARY_CALL_DELAY_SEC     : 순차 호출 간 대기(기본 4초 = 15 RPM 안전)
+#   SUMMARY_CALL_DELAY_SEC     : 순차 호출 간 대기(기본 3초 — Gemini 15 RPM 내 안전)
 #   SUMMARY_MAX_WORKERS        : parallel 일 때 동시 실행 수 (기본 4)
+#   SUMMARY_ADAPTIVE_DELAY     : "true" 이면 429 에러 시 자동으로 딜레이 증가 (기본 true)
 SUMMARY_MODE = os.getenv("SUMMARY_MODE", "sequential").strip().lower()
-SUMMARY_CALL_DELAY_SEC = float(os.getenv("SUMMARY_CALL_DELAY_SEC", "4"))
+SUMMARY_CALL_DELAY_SEC = float(os.getenv("SUMMARY_CALL_DELAY_SEC", "3"))
 SUMMARY_MAX_WORKERS = int(os.getenv("SUMMARY_MAX_WORKERS", "4"))
+SUMMARY_ADAPTIVE_DELAY = os.getenv("SUMMARY_ADAPTIVE_DELAY", "true").strip().lower() == "true"
 
 # 개별 뉴스 요약에 원문 본문(스크래핑 결과)이 얼마나 잘려 들어갈지
 # — v2.9.6: 컴팩트 카드 다이어트로 출력 자체가 짧아져 입력도 1500→1000 으로 조정.
@@ -1284,9 +1286,10 @@ def summarize_all_items_parallel(
     """
     v2.6.0: 환경 변수 SUMMARY_MODE 에 따라 순차/병렬 분기.
     v2.9.5: weak_axes 파라미터 추가 — 모든 카드에 동일한 강화 지침 주입.
+    v2.9.8: 적응형 딜레이 — 기본 3초, 429 에러 시 자동 백오프(+2초씩, 최대 8초).
 
     - sequential (기본): 각 호출 사이 SUMMARY_CALL_DELAY_SEC 초 대기.
-      Gemini 무료 티어 RPM(분당 10회) 제한을 안전하게 통과.
+      Gemini 무료 티어 RPM(분당 15회) 제한을 안전하게 통과.
     - parallel: 기존 ThreadPoolExecutor 기반 병렬 실행.
 
     환경 변수
@@ -1304,20 +1307,56 @@ def summarize_all_items_parallel(
     results: Dict[int, str] = {}
 
     if mode == "sequential":
+        # v2.9.8: 적응형 딜레이 — 기본 3초 시작, 429 시 자동 백오프
+        current_delay = SUMMARY_CALL_DELAY_SEC
+        consecutive_ok = 0  # 연속 성공 횟수 (딜레이 복원 판단)
+        BACKOFF_STEP = 2.0   # 429 시 증가량
+        MAX_DELAY = 8.0      # 최대 딜레이
+        RECOVERY_THRESHOLD = 3  # N회 연속 성공 시 딜레이 원복 시도
         logger.info(
-            "Step 2) 순차 모드 — %d건, 호출 간격 %.1f초%s",
-            len(ranked_items), SUMMARY_CALL_DELAY_SEC,
+            "Step 2) 순차 모드 — %d건, 초기 간격 %.1f초, 적응형=%s%s",
+            len(ranked_items), current_delay,
+            "ON" if SUMMARY_ADAPTIVE_DELAY else "OFF",
             f" (강화 축: {weak_axes})" if weak_axes else "",
         )
         for idx, item in enumerate(ranked_items):
             rank = item["rank"]
-            if idx > 0 and SUMMARY_CALL_DELAY_SEC > 0:
-                time.sleep(SUMMARY_CALL_DELAY_SEC)
+            if idx > 0 and current_delay > 0:
+                time.sleep(current_delay)
             try:
                 results[rank] = summarize_one_item(client, item, weak_axes=weak_axes)
+                consecutive_ok += 1
+                # v2.9.8: 연속 성공 시 딜레이 점진 복원
+                if (SUMMARY_ADAPTIVE_DELAY and consecutive_ok >= RECOVERY_THRESHOLD
+                        and current_delay > SUMMARY_CALL_DELAY_SEC):
+                    current_delay = max(SUMMARY_CALL_DELAY_SEC, current_delay - 1.0)
+                    consecutive_ok = 0
+                    logger.info("Step 2) 적응형: 딜레이 복원 → %.1f초", current_delay)
             except Exception as exc:  # noqa: BLE001
-                logger.error("Step 2) item %d 예외(순차): %s", rank, exc)
-                results[rank] = _fallback_item_markdown(item)
+                err_str = str(exc).lower()
+                # v2.9.8: 429 Rate Limit 감지 → 적응형 백오프
+                if SUMMARY_ADAPTIVE_DELAY and ("429" in err_str or "rate" in err_str
+                        or "resource_exhausted" in err_str or "quota" in err_str):
+                    old_delay = current_delay
+                    current_delay = min(MAX_DELAY, current_delay + BACKOFF_STEP)
+                    consecutive_ok = 0
+                    logger.warning(
+                        "Step 2) item %d 429 감지 → 딜레이 %.1f→%.1f초, 재시도 대기",
+                        rank, old_delay, current_delay,
+                    )
+                    time.sleep(current_delay)  # 추가 대기 후 재시도
+                    try:
+                        results[rank] = summarize_one_item(client, item, weak_axes=weak_axes)
+                        consecutive_ok += 1
+                    except Exception as retry_exc:  # noqa: BLE001
+                        logger.error("Step 2) item %d 재시도 실패: %s", rank, retry_exc)
+                        results[rank] = _fallback_item_markdown(item)
+                else:
+                    logger.error("Step 2) item %d 예외(순차): %s", rank, exc)
+                    results[rank] = _fallback_item_markdown(item)
+        if current_delay != SUMMARY_CALL_DELAY_SEC:
+            logger.info("Step 2) 순차 완료 — 최종 딜레이 %.1f초 (초기 %.1f초)",
+                        current_delay, SUMMARY_CALL_DELAY_SEC)
         return [results[r] for r in sorted(results.keys())]
 
     # parallel 모드 (하위 호환)
