@@ -2546,7 +2546,7 @@ ${resetMin}분 뒤에 1슬롯 회복됩니다. GitHub Actions 월 무료 쿼터(
                 ? `✅ 워크플로우 자동 활성화 후 ${stageLabelKo} 단계 요청됨`
                 : (dryRun
                     ? '✅ 워크플로우 자동 활성화 후 DRY RUN 요청됨'
-                    : '✅ 워크플로우 자동 활성화 후 브리핑 발송 요청됨 — 약 1~3분 뒤 이메일 도착'),
+                    : '✅ 워크플로우 자동 활성화 후 브리핑 발송 요청됨 — 약 5~8분 뒤 이메일 도착'),
               runsUrl: `https://github.com/${repo}/actions/workflows/${workflow}`,
             })
           }
