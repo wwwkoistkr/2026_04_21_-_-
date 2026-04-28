@@ -1798,6 +1798,37 @@
       refreshCooldownState()
     }
 
+    // v2.9.8: 진행 단계 예측 (예상 타임라인)
+    const stageEstimates = [
+      { name: '큐 대기', endSec: 30 },
+      { name: '환경 셋업', endSec: 90 },
+      { name: '뉴스 수집', endSec: 180 },
+      { name: 'AI 요약 (병목)', endSec: 360 },
+      { name: '이메일 발송', endSec: 420 },
+    ]
+    const totalEstSec = 420 // 예상 총 시간 (7분)
+
+    function fmtElapsed(s) {
+      const m = Math.floor(s / 60)
+      const sec = s % 60
+      return m > 0 ? `${m}분 ${sec}초` : `${sec}초`
+    }
+
+    function guessStage(sec) {
+      for (let i = stageEstimates.length - 1; i >= 0; i--) {
+        if (sec < stageEstimates[i].endSec) continue
+        return stageEstimates[i].name
+      }
+      return stageEstimates[0].name
+    }
+
+    function progressBar(sec) {
+      const pct = Math.min(100, Math.round((sec / totalEstSec) * 100))
+      return `<div class="w-full bg-blue-100 rounded-full h-2 mt-2 overflow-hidden">` +
+        `<div class="bg-blue-500 h-2 rounded-full transition-all duration-700" style="width:${pct}%"></div></div>` +
+        `<div class="text-[10px] text-blue-500 mt-1 text-right">${pct}% (예상)</div>`
+    }
+
     triggerPollTimer = setInterval(async () => {
       elapsed += 10
       if (elapsed > MAX_MIN * 60) {
@@ -1805,7 +1836,16 @@
         showTriggerStatus(
           'bg-amber-50 border border-amber-200 text-amber-800',
           '<i class="fa-solid fa-triangle-exclamation mr-1"></i>' +
-            '폴링 타임아웃 — GitHub Actions 페이지에서 직접 확인해 주세요.'
+            `<strong>폴링 타임아웃 (${fmtElapsed(elapsed)})</strong> — 워크플로우가 아직 실행 중일 수 있습니다.` +
+            `<div class="text-xs mt-1.5 opacity-90">` +
+              `💡 일반적으로 4~8분이 소요됩니다. AI 요약 단계가 가장 오래 걸립니다.<br>` +
+              `아래 버튼으로 직접 확인하거나, 잠시 후 새로고침해 주세요.` +
+            `</div>` +
+            `<div class="flex gap-2 mt-2">` +
+              `<button onclick="document.getElementById('btnCheckStatus').click()" ` +
+                `class="px-3 py-1 bg-amber-500 text-white text-xs rounded hover:bg-amber-600 transition">` +
+                `<i class="fa-solid fa-rotate mr-1"></i>상태 재확인</button>` +
+            `</div>`
         )
         release()
         return
@@ -1858,14 +1898,18 @@
         }
         release()
       } else {
-        // in_progress / queued
+        // in_progress / queued — v2.9.8: 상세 진행 정보 표시
         const statusKo =
-          match.status === 'queued' ? '대기 중' :
+          match.status === 'queued' ? '큐 대기 중' :
           match.status === 'in_progress' ? '실행 중' : match.status
+        const curStage = match.status === 'in_progress' ? guessStage(elapsed) : '큐 대기'
         showTriggerStatus(
           'bg-blue-50 border border-blue-200 text-blue-800',
-          `<i class="fa-solid fa-spinner fa-spin mr-1"></i>워크플로 <strong>${statusKo}</strong>… (${elapsed}초 경과)
-          <a href="${match.html_url}" target="_blank" class="underline ml-2">실시간 로그</a>`
+          `<i class="fa-solid fa-spinner fa-spin mr-1"></i>워크플로 <strong>${statusKo}</strong> — ` +
+          `<span class="font-semibold">${curStage}</span> 추정 (${fmtElapsed(elapsed)} 경과)` +
+          `<a href="${match.html_url}" target="_blank" class="underline ml-2 text-xs">실시간 로그</a>` +
+          progressBar(elapsed) +
+          `<div class="text-[10px] text-blue-400 mt-0.5">💡 AI 요약 단계가 가장 오래 걸립니다 (보통 4~8분 소요)</div>`
         )
       }
     }, 10000)

@@ -158,18 +158,18 @@ ITEM_MAX_OUTPUT_TOKENS = 1200   # v2.9.6: 2048→1200 (컴팩트 출력 강제)
 # v2.9.0: 허용 카테고리 엄격 제한 (반도체 + 원자력 2종만)
 ALLOWED_CATEGORIES = ("반도체", "원자력")
 
-# ─── v2.6.0: 순차 호출/페이싱 (Gemini 무료 티어 RPM 제한 대응) ────
-# Gemini 무료 티어: gemini-2.5-flash = 10 RPM (분당 10회).
-# 기존엔 ThreadPoolExecutor(max_workers=4) 로 동시에 4건을 호출했고,
-# 10건 랭킹+총평까지 합치면 12회/1분 이내로 초과해 429 발생 빈번.
+# ─── v2.9.8: 순차 호출/페이싱 (Gemini RPM 제한 대응) ────
+# Gemini 무료 티어: gemini-2.5-flash = 15 RPM (분당 15회).
+# v2.6.0 당시 10 RPM 기준 6초 딜레이 → v2.9.8에서 15 RPM 기준 4초로 단축.
+# 이론적 최소 간격 = 60/15 = 4초. 안전 마진 포함하여 4초로 설정.
 # SUMMARY_MODE=sequential 이면 각 호출 사이 SUMMARY_CALL_DELAY_SEC 초 대기.
 #
 # 환경 변수
 #   SUMMARY_MODE               : "sequential" | "parallel" (기본 sequential)
-#   SUMMARY_CALL_DELAY_SEC     : 순차 호출 간 대기(기본 6초 = 10 RPM 안전)
+#   SUMMARY_CALL_DELAY_SEC     : 순차 호출 간 대기(기본 4초 = 15 RPM 안전)
 #   SUMMARY_MAX_WORKERS        : parallel 일 때 동시 실행 수 (기본 4)
 SUMMARY_MODE = os.getenv("SUMMARY_MODE", "sequential").strip().lower()
-SUMMARY_CALL_DELAY_SEC = float(os.getenv("SUMMARY_CALL_DELAY_SEC", "6"))
+SUMMARY_CALL_DELAY_SEC = float(os.getenv("SUMMARY_CALL_DELAY_SEC", "4"))
 SUMMARY_MAX_WORKERS = int(os.getenv("SUMMARY_MAX_WORKERS", "4"))
 
 # 개별 뉴스 요약에 원문 본문(스크래핑 결과)이 얼마나 잘려 들어갈지
