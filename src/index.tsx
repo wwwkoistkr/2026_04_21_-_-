@@ -482,7 +482,7 @@ app.get('/', (c) => {
             </p>
             <p class="text-[11px] text-gray-500 mt-1 flex items-center gap-1.5 flex-wrap">
               <span class="inline-flex items-center px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium"><i class="fa-regular fa-clock mr-0.5"></i>예상 5~9분</span>
-              <span>뉴스 수집 ~2분 → <strong>AI 요약 ~5분</strong> (병목, 15건×3초+응답) → 발송 ~30초</span>
+              <span>뉴스 수집 ~2분 → <strong>AI 요약 ~5분</strong> (병목, 15건) → 발송 ~30초 · v2.9.10 솔직 시간</span>
             </p>
             <div id="triggerStatus" class="hidden mt-3 p-3 rounded-lg text-xs sm:text-sm"></div>
           </div>
