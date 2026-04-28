@@ -481,8 +481,8 @@ app.get('/', (c) => {
               매일 06:30 KST 스케줄과 별도로, <strong>지금 바로</strong> 최신 뉴스를 수집·요약·이메일 발송합니다.
             </p>
             <p class="text-[11px] text-gray-500 mt-1 flex items-center gap-1.5 flex-wrap">
-              <span class="inline-flex items-center px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium"><i class="fa-regular fa-clock mr-0.5"></i>예상 4~7분</span>
-              <span>뉴스 수집 ~1분 → <strong>AI 요약 ~3분</strong> (병목) → 발송 ~30초</span>
+              <span class="inline-flex items-center px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-medium"><i class="fa-regular fa-clock mr-0.5"></i>예상 5~9분</span>
+              <span>뉴스 수집 ~2분 → <strong>AI 요약 ~5분</strong> (병목, 15건×3초+응답) → 발송 ~30초</span>
             </p>
             <div id="triggerStatus" class="hidden mt-3 p-3 rounded-lg text-xs sm:text-sm"></div>
           </div>
@@ -2488,7 +2488,7 @@ ${resetMin}분 뒤에 1슬롯 회복됩니다. GitHub Actions 월 무료 쿼터(
           ? `✅ ${stageLabelKo} 단계 워크플로우 요청됨 — GitHub Actions 에서 실행 중`
           : (dryRun
               ? '✅ DRY RUN 요청됨 — 메일 발송 없이 프리뷰만 생성'
-              : '✅ 브리핑 발송 요청됨 — 약 5~8분 뒤 이메일 도착 (AI 요약 단계에 시간 소요)'),
+              : '✅ 브리핑 발송 요청됨 — 약 5~9분 뒤 이메일 도착 (AI 요약 단계가 병목 · v2.9.10)'),
         runsUrl: `https://github.com/${repo}/actions/workflows/${workflow}`,
       })
     }
@@ -2546,7 +2546,7 @@ ${resetMin}분 뒤에 1슬롯 회복됩니다. GitHub Actions 월 무료 쿼터(
                 ? `✅ 워크플로우 자동 활성화 후 ${stageLabelKo} 단계 요청됨`
                 : (dryRun
                     ? '✅ 워크플로우 자동 활성화 후 DRY RUN 요청됨'
-                    : '✅ 워크플로우 자동 활성화 후 브리핑 발송 요청됨 — 약 5~8분 뒤 이메일 도착'),
+                    : '✅ 워크플로우 자동 활성화 후 브리핑 발송 요청됨 — 약 5~9분 뒤 이메일 도착 (v2.9.10)'),
               runsUrl: `https://github.com/${repo}/actions/workflows/${workflow}`,
             })
           }

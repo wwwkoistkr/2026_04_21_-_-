@@ -1720,15 +1720,15 @@
     const confirmBody = dryRun
       ? '수집·AI요약만 수행하고 <strong>메일은 보내지 않습니다</strong>.<br>결과는 GitHub Actions 페이지의 artifact 로 다운로드 가능합니다.' +
         '<div class="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">' +
-          '<i class="fa-solid fa-clock mr-1"></i><strong>예상 소요 시간: 약 4~7분</strong>' +
-          '<div class="mt-1 text-[11px] text-blue-500">환경 셋업(1분) → 뉴스 수집(1~2분) → <strong>AI 요약(2~3분, 병목)</strong></div>' +
-          '<div class="mt-0.5 text-[10px] text-gray-400">쿨다운: 30초 (테스트 빠른 반복용)</div>' +
+          '<i class="fa-solid fa-clock mr-1"></i><strong>예상 소요 시간: 약 5~9분</strong>' +
+          '<div class="mt-1 text-[11px] text-blue-500">환경 셋업(1분) → 뉴스 수집(1~2분) → <strong>AI 요약(3~5분, 병목)</strong></div>' +
+          '<div class="mt-0.5 text-[10px] text-gray-400">쿨다운: 30초 (테스트 빠른 반복용) · v2.9.10 솔직 시간 표기</div>' +
         '</div>'
       : '지금 즉시 <strong>모든 활성 수신자에게 메일</strong>이 발송됩니다.' +
         '<div class="mt-2 p-2 bg-blue-50 rounded text-xs text-blue-700">' +
-          '<i class="fa-solid fa-clock mr-1"></i><strong>예상 소요 시간: 약 5~8분</strong>' +
-          '<div class="mt-1 text-[11px] text-blue-500">환경 셋업 → 뉴스 수집 → <strong>AI 요약(병목)</strong> → 이메일 발송</div>' +
-          '<div class="mt-0.5 text-[10px] text-gray-400">5분 쿨다운 적용 | AI 요약 단계가 가장 오래 걸립니다</div>' +
+          '<i class="fa-solid fa-clock mr-1"></i><strong>예상 소요 시간: 약 5~9분</strong>' +
+          '<div class="mt-1 text-[11px] text-blue-500">환경 셋업 → 뉴스 수집 → <strong>AI 요약(병목, 3~5분)</strong> → 이메일 발송</div>' +
+          '<div class="mt-0.5 text-[10px] text-gray-400">5분 쿨다운 적용 | AI 요약 단계가 가장 오래 걸립니다 · v2.9.10 솔직 시간 표기</div>' +
         '</div>' +
         '<div class="mt-1 text-xs text-amber-600"><i class="fa-solid fa-triangle-exclamation mr-1"></i>수신자 스팸 처리 방지를 위해 과도한 반복 발송은 피하세요.</div>'
 
@@ -1804,24 +1804,38 @@
   function startPolling(sinceMs, dryRun) {
     clearInterval(triggerPollTimer)
     let elapsed = 0
-    const MAX_MIN = 8  // v2.9.7: 5→8분 확장 (워크플로우 실행 시간 + 큐 대기 고려)
+    const MAX_MIN = 12  // v2.9.10: 8→12분 확장 (워크플로 timeout 15분 - 큐 대기 3분 안전 마진)
 
+    // v2.9.10: timeout 분기에서도 잠금을 5분간 유지하여 이중발송 방지
+    //  - 이전: timeout → release() 즉시 → 사용자가 버튼 다시 누름 → 워크플로 2개 동시 실행
+    //  - 개선: timeout → 5분 더 잠금 → 5분 쿨다운과 자연스럽게 맞물림
+    let releasedByTimeout = false
     const release = () => {
       triggerInFlight = false
       setTriggerButtonsDisabled(false)
       // v2.3.1: 릴리즈 직후 카운트다운 즉시 동기화 (버튼에 남은 시간 반영)
       refreshCooldownState()
     }
+    const releaseDelayed = (delayMs) => {
+      releasedByTimeout = true
+      // 즉시 해제하지 않고 delayMs 후에 해제 — 그 사이 사용자가 버튼 못 누름
+      setTimeout(() => {
+        // 그 사이 다른 트리거가 있었으면 무시
+        if (releasedByTimeout) release()
+      }, delayMs)
+    }
 
-    // v2.9.9: 진행 단계 예측 (딜레이 3초 기준 재산정)
+    // v2.9.10: 진행 단계 예측 (딜레이 3초가 실제 작동하는 v2.9.10 기준 재산정)
+    //   환경 셋업 ~70s + 수집 ~70s + AI 요약(15건×3초 + 모델 응답 ~6s/건 ≈ 135s) + 마진 + 발송 ~30s
+    //   = 80 + 70 + 250 + 30 = 430s ≈ 7분 10초 (이전 6분 추정 → 8분으로 솔직화)
     const stageEstimates = [
-      { name: '큐 대기', endSec: 20, icon: '⏳' },
-      { name: '환경 셋업', endSec: 70, icon: '📦' },
-      { name: '뉴스 수집', endSec: 140, icon: '📰' },
-      { name: 'AI 요약 (병목)', endSec: 320, icon: '🤖' },
-      { name: '이메일 발송', endSec: 360, icon: '✉️' },
+      { name: '큐 대기', endSec: 30, icon: '⏳' },
+      { name: '환경 셋업', endSec: 100, icon: '📦' },
+      { name: '뉴스 수집', endSec: 180, icon: '📰' },
+      { name: 'AI 요약 (병목)', endSec: 430, icon: '🤖' },
+      { name: '이메일 발송', endSec: 480, icon: '✉️' },
     ]
-    const totalEstSec = 360 // 예상 총 시간 (6분, 딜레이 3초 기준)
+    const totalEstSec = 480 // v2.9.10: 360→480 (8분, 보수적·솔직한 예상)
 
     function fmtElapsed(s) {
       const m = Math.floor(s / 60)
@@ -1871,8 +1885,9 @@
           '<i class="fa-solid fa-triangle-exclamation mr-1"></i>' +
             `<strong>폴링 시간 초과 (${fmtElapsed(elapsed)})</strong> — 워크플로우가 아직 실행 중일 수 있습니다.` +
             `<div class="text-xs mt-1.5 opacity-90">` +
-              `⏱️ 예상 소요 4~7분 | AI 요약(15건×3초) 단계에서 대부분의 시간이 소요됩니다.<br>` +
-              `아래 <strong>상태 재확인</strong> 버튼으로 완료 여부를 확인하세요.` +
+              `⏱️ 예상 소요 5~9분 | AI 요약(15건×3초+응답시간) 단계에서 대부분의 시간이 소요됩니다.<br>` +
+              `아래 <strong>상태 재확인</strong> 버튼으로 완료 여부를 확인하세요.<br>` +
+              `<span class="text-amber-700 font-semibold">🔒 v2.9.10: 이중발송 방지를 위해 약 5분간 버튼이 잠금 상태로 유지됩니다.</span>` +
             `</div>` +
             `<div class="flex gap-2 mt-2">` +
               `<button onclick="document.getElementById('btnCheckTriggerStatus').click()" ` +
@@ -1883,7 +1898,10 @@
                 `<i class="fa-brands fa-github mr-1"></i>GitHub Actions 확인</a>` +
             `</div>`
         )
-        release()
+        // v2.9.10: 즉시 release() 대신 5분 후 release — 이중발송 차단.
+        // 사용자가 timeout 메시지 보고 "강제 해제" 누를 수도 있고, 실제 워크플로 success 시
+        // 폴링 외 통로(상태 재확인)로 결과 확인 가능. 5분 = 실제 발송 쿨다운과 자연 정합.
+        releaseDelayed(5 * 60 * 1000)
         return
       }
 
@@ -1945,7 +1963,7 @@
           `<span class="font-semibold">${stg.icon || ''} ${stg.name}</span> 추정 (${fmtElapsed(elapsed)} 경과)` +
           `<a href="${match.html_url}" target="_blank" class="underline ml-2 text-xs">실시간 로그</a>` +
           progressBar(elapsed) +
-          `<div class="text-[10px] text-blue-400 mt-0.5">💡 예상 총 소요 4~7분 — AI 요약 단계(15건×3초)가 가장 오래 걸립니다</div>`
+          `<div class="text-[10px] text-blue-400 mt-0.5">💡 예상 총 소요 5~9분 — AI 요약 단계(15건×3초+모델응답)가 가장 오래 걸립니다 (v2.9.10)</div>`
         )
       }
     }, 10000)

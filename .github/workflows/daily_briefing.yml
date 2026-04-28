@@ -52,7 +52,9 @@ jobs:
           BRIEFING_READ_TOKEN:  ${{ secrets.BRIEFING_READ_TOKEN }}
           DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           SUMMARY_MODE:           ${{ secrets.SUMMARY_MODE || 'sequential' }}
-          SUMMARY_CALL_DELAY_SEC: ${{ secrets.SUMMARY_CALL_DELAY_SEC || '6' }}
+          # v2.9.10: 6초 → 3초 (Gemini 15 RPM 안전 + 적응형 백오프 보유).
+          # v2.9.9 의 코드 기본값(3초)과 일치시켜 환경변수가 무력화시키던 문제 해소.
+          SUMMARY_CALL_DELAY_SEC: ${{ secrets.SUMMARY_CALL_DELAY_SEC || '3' }}
         run: python main.py all
 
       - name: Upload HTML preview (dry run only)

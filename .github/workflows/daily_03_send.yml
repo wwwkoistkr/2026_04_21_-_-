@@ -9,7 +9,9 @@ name: Morning Stock AI — 3/3 Send
 
 on:
   schedule:
-    # 06:25 KST (= 21:25 UTC) — summarize(06:10) 완료 후 15분 여유
+    # 06:45 KST (= 21:45 UTC) — summarize(06:00) 완료 후 45분 여유
+    # v2.9.10: 주석을 실제 cron(=21:45 UTC=06:45 KST) 과 일치시킴.
+    # 45분 여유는 Stage 2 가 8분 걸려도 안전하고, KV 4회 재시도(60→90→120초) 도 충분히 수용.
     - cron: '45 21 * * *'
   workflow_dispatch:
     inputs:

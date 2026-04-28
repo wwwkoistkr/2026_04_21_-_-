@@ -9,7 +9,8 @@ name: Morning Stock AI — 2/3 Summarize
 
 on:
   schedule:
-    # 06:10 KST (= 21:10 UTC) — collect(06:00) 완료 후 10분 여유
+    # 06:00 KST (= 21:00 UTC) — collect(05:50) 완료 후 10분 여유
+    # v2.9.10: 주석을 실제 cron(=21:00 UTC=06:00 KST) 과 일치시킴.
     - cron: '0 21 * * *'
   workflow_dispatch: {}
   # v2.7.0 (2026-04-24): workflow_run 트리거 제거.
@@ -46,9 +47,11 @@ jobs:
           BRIEFING_ADMIN_API:   ${{ secrets.BRIEFING_ADMIN_API }}
           BRIEFING_READ_TOKEN:  ${{ secrets.BRIEFING_READ_TOKEN }}
           BRIEFING_REPORT_TOKEN: ${{ secrets.BRIEFING_REPORT_TOKEN }}
-          # v2.6.0: 순차 호출 + 6초 간격 → 무료 티어 10 RPM 안전 통과
+          # v2.9.10: 6초 → 3초 (Gemini 15 RPM 안전 + 적응형 백오프 보유).
+          # v2.9.9 의 코드 기본값(3초)과 일치시켜 환경변수가 무력화시키던 문제 해소.
+          # 15건 × 3초 = 45초 (이전: 90초) → Stage 2 약 1분 단축.
           SUMMARY_MODE:           ${{ secrets.SUMMARY_MODE || 'sequential' }}
-          SUMMARY_CALL_DELAY_SEC: ${{ secrets.SUMMARY_CALL_DELAY_SEC || '6' }}
+          SUMMARY_CALL_DELAY_SEC: ${{ secrets.SUMMARY_CALL_DELAY_SEC || '3' }}
         run: python main.py summarize
 
       - name: Upload summary backup (always)
