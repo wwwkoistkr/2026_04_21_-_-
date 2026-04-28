@@ -1740,12 +1740,15 @@
         }
 
         if (res.ok) {
+          const autoTag = res.autoEnabled
+            ? '<span class="inline-block ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded">🔄 자동 활성화됨</span>'
+            : ''
           showTriggerStatus(
             'bg-green-50 border border-green-200 text-green-800',
-            `<i class="fa-solid fa-check-circle mr-1"></i>${res.message}
+            `<i class="fa-solid fa-check-circle mr-1"></i>${res.message}${autoTag}
              <a href="${res.runsUrl}" target="_blank" class="underline ml-2">진행 상황 보기 <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>`
           )
-          toast('🚀 발송 요청 완료', 'success')
+          toast(res.autoEnabled ? '🔄 워크플로우 자동 활성화 후 발송 요청 완료' : '🚀 발송 요청 완료', 'success')
           // v2.3.1: 서버 쿨다운 상태 즉시 재동기화 (버튼 카운트다운 시작)
           refreshCooldownState()
           // 상태 폴링 시작 — dryRun 값까지 일치해야 매칭 (다른 동시 실행과 혼동 방지)
@@ -1786,7 +1789,7 @@
   function startPolling(sinceMs, dryRun) {
     clearInterval(triggerPollTimer)
     let elapsed = 0
-    const MAX_MIN = 5
+    const MAX_MIN = 8  // v2.9.7: 5→8분 확장 (워크플로우 실행 시간 + 큐 대기 고려)
 
     const release = () => {
       triggerInFlight = false

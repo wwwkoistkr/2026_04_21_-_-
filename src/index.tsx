@@ -2499,6 +2499,61 @@ ${resetMin}분 뒤에 1슬롯 회복됩니다. GitHub Actions 월 무료 쿼터(
       detail = await resp.text()
     }
 
+    // ── v2.9.7: 422 disabled workflow 자동 복구 ──────────────────────
+    // GitHub 는 60일 미커밋 등으로 워크플로우를 자동 비활성화할 수 있다.
+    // 422 + "disabled" 키워드 감지 시 → PUT .../enable → 재 dispatch 시도.
+    if (resp.status === 422 && detail.toLowerCase().includes('disabled')) {
+      const enableUrl = `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/enable`
+      try {
+        const enableResp = await fetch(enableUrl, {
+          method: 'PUT',
+          headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${token}`,
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'MorningStockAI-BriefingCenter/2.1',
+          },
+        })
+        if (enableResp.status === 204) {
+          // 활성화 성공 → 1초 대기 후 dispatch 재시도
+          await new Promise(r => setTimeout(r, 1000))
+          const retryResp = await fetch(dispatchUrl, {
+            method: 'POST',
+            headers: {
+              Accept: 'application/vnd.github+json',
+              Authorization: `Bearer ${token}`,
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'MorningStockAI-BriefingCenter/2.1',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ ref: 'main', inputs: dispatchInputs }),
+          })
+          if (retryResp.status === 204) {
+            await saveTrigger(c.env, { timestamp: now, dryRun, ok: true })
+            if (dryRun && !isStageMode) await recordDryRun(c.env)
+            const stageLabelKo = ({
+              collect: '수집', summarize: '요약', send: '발송', all: '전체',
+            } as Record<string, string>)[stage]
+            return c.json({
+              ok: true,
+              dryRun,
+              stage,
+              autoEnabled: true,
+              message: isStageMode
+                ? `✅ 워크플로우 자동 활성화 후 ${stageLabelKo} 단계 요청됨`
+                : (dryRun
+                    ? '✅ 워크플로우 자동 활성화 후 DRY RUN 요청됨'
+                    : '✅ 워크플로우 자동 활성화 후 브리핑 발송 요청됨 — 약 1~3분 뒤 이메일 도착'),
+              runsUrl: `https://github.com/${repo}/actions/workflows/${workflow}`,
+            })
+          }
+        }
+      } catch (_enableErr) {
+        // enable 시도 자체가 실패해도 아래 일반 에러 분기로 폴스루
+      }
+    }
+    // ── /v2.9.7 ──────────────────────────────────────────────────────
+
     await saveTrigger(c.env, { timestamp: now, dryRun, ok: false })
     return c.json({
       ok: false,
@@ -2507,6 +2562,8 @@ ${resetMin}분 뒤에 1슬롯 회복됩니다. GitHub Actions 월 무료 쿼터(
         ? 'PAT 토큰이 잘못되었거나 만료됨. repo + workflow 권한 확인.'
         : resp.status === 404
         ? `워크플로 파일(${workflow}) 또는 저장소(${repo}) 를 찾을 수 없음.`
+        : resp.status === 422
+        ? `워크플로(${workflow})가 비활성화 상태입니다. 자동 활성화를 시도했지만 실패했습니다. GitHub → Actions 탭에서 "Enable workflow" 버튼을 눌러 수동으로 활성화하세요. → https://github.com/${repo}/actions`
         : undefined,
     }, 502)
   } catch (e: any) {
