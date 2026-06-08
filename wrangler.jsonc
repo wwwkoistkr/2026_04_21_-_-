@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "morning-stock-briefing",
+  "compatibility_date": "2026-04-13",
+  "pages_build_output_dir": "./dist",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  // ── KV: 사용자 등록 뉴스 소스 저장용 ─────────────────
+  // 로컬 개발은 --local 플래그로 자동 생성되는 미러 KV 사용.
+  // 프로덕션 배포 전에 아래 명령으로 실제 KV 생성 후 id 교체:
+  //   npx wrangler kv namespace create SOURCES_KV
+  "kv_namespaces": [
+    {
+      "binding": "SOURCES_KV",
+      "id": "058fd3613bb34ef08d5aa3d1bbf306cc"
+    }
+  ]
+  // 로그인 비밀번호 / 브리핑 API 토큰은 wrangler secret 로 저장:
+  //   npx wrangler pages secret put ADMIN_PASSWORD
+  //   npx wrangler pages secret put BRIEFING_READ_TOKEN
+}
