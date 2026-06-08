@@ -8,6 +8,7 @@ Seeking Alpha, ETF.com, Morningstar 는 봇 차단이 강력합니다.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Dict, List
 from urllib.parse import quote_plus
 
@@ -19,19 +20,29 @@ logger = logging.getLogger(__name__)
 # Google News RSS 우회 대상 – site 와 검색어 조합
 # ---------------------------------------------------------------------------
 US_FEEDS: List[Dict[str, str]] = [
-    {"source": "Seeking Alpha", "site": "seekingalpha.com", "query": "semiconductor"},
-    {"source": "Seeking Alpha (ETF)", "site": "seekingalpha.com", "query": "ETF"},
-    {"source": "ETF.com", "site": "etf.com", "query": "semiconductor"},
-    {"source": "Morningstar", "site": "morningstar.com", "query": "semiconductor ETF"},
-    # 보너스: Reuters / Bloomberg 에서도 반도체 뉴스 추출
-    {"source": "Reuters", "site": "reuters.com", "query": "semiconductor"},
-    {"source": "Bloomberg", "site": "bloomberg.com", "query": "semiconductor"},
+    {"source": "Seeking Alpha", "site": "seekingalpha.com", "query": "semiconductor AI chip", "topic": "semiconductor"},
+    {"source": "Seeking Alpha (ETF)", "site": "seekingalpha.com", "query": "semiconductor ETF AI ETF", "topic": "etf"},
+    {"source": "ETF.com", "site": "etf.com", "query": "semiconductor ETF nuclear ETF robotics ETF", "topic": "etf"},
+    {"source": "Morningstar", "site": "morningstar.com", "query": "semiconductor ETF uranium ETF", "topic": "etf"},
+    {"source": "Reuters", "site": "reuters.com", "query": "semiconductor AI chip robotics nuclear SMR", "topic": "semiconductor"},
+    {"source": "Bloomberg", "site": "bloomberg.com", "query": "AI chip physical AI nuclear power data center", "topic": "semiconductor"},
+    {"source": "NVIDIA Newsroom", "site": "nvidianews.nvidia.com", "query": "physical AI robotics autonomous vehicles", "topic": "physical_ai"},
+    {"source": "The Robot Report", "site": "therobotreport.com", "query": "physical AI robotics NVIDIA humanoid", "topic": "physical_ai"},
+    {"source": "IEEE Spectrum Robotics", "site": "spectrum.ieee.org", "query": "robotics physical AI autonomous", "topic": "physical_ai"},
+    {"source": "U.S. EIA", "site": "eia.gov", "query": "small modular reactor nuclear power uranium", "topic": "nuclear"},
+    {"source": "U.S. NRC", "site": "nrc.gov", "query": "advanced reactor SMR microreactor", "topic": "nuclear"},
+    {"source": "World Nuclear News", "site": "world-nuclear-news.org", "query": "SMR uranium nuclear power", "topic": "nuclear"},
+    {"source": "ARK Invest", "site": "ark-invest.com", "query": "robotics physical AI autonomous technology", "topic": "physical_ai"},
+    {"source": "WisdomTree", "site": "wisdomtree.com", "query": "physical AI robotics ETF", "topic": "etf"},
 ]
 
 
 def _build_google_news_rss(site: str, query: str) -> str:
     """Google News RSS 검색 URL 생성."""
+    window = os.getenv("GOOGLE_NEWS_RECENT_WINDOW", "2d").strip()
     q = f"site:{site} {query}"
+    if window and "when:" not in q:
+        q = f"{q} when:{window}"
     return (
         "https://news.google.com/rss/search?"
         f"q={quote_plus(q)}&hl=en-US&gl=US&ceid=US:en"
@@ -52,6 +63,10 @@ def get_us_news(per_feed_limit: int = 3) -> List[Dict[str, str]]:
 
         try:
             news = get_news_from_rss(source_name, url, limit=per_feed_limit)
+            topic = feed_info.get("topic", "general")
+            for item in news:
+                item.setdefault("topic", topic)
+                item.setdefault("category_group", "us")
             all_news.extend(news)
             logger.info("[%s] %d건 수집 완료", source_name, len(news))
             print(f"✅ {source_name}: {len(news)}건 수집 완료")

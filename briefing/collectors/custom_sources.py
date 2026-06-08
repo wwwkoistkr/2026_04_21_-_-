@@ -47,6 +47,14 @@ from briefing.collectors.run_reporter import RunReporter
 logger = logging.getLogger(__name__)
 
 
+def _recent_query(query: str = "") -> str:
+    window = os.getenv("GOOGLE_NEWS_RECENT_WINDOW", "2d").strip()
+    base = (query or "").strip()
+    if window and "when:" not in base:
+        return f"{base} when:{window}".strip()
+    return base
+
+
 def _build_google_news_rss(site: str, query: str = "", kr: bool = False) -> str:
     """Google News RSS 검색 URL 생성.
 
@@ -59,7 +67,7 @@ def _build_google_news_rss(site: str, query: str = "", kr: bool = False) -> str:
     kr : bool
         한국어 결과 우선 여부
     """
-    q = f"site:{site} {query}".strip()
+    q = f"site:{site} {_recent_query(query)}".strip()
     lang = "hl=ko&gl=KR&ceid=KR:ko" if kr else "hl=en-US&gl=US&ceid=US:en"
     return f"https://news.google.com/rss/search?q={quote_plus(q)}&{lang}"
 
@@ -117,6 +125,7 @@ def _collect_one_source(
     queries = src.get("queries", []) or []
     default_limit = max(1, min(10, int(src.get("defaultLimit", 5))))
     category = src.get("category", "custom")
+    topic = src.get("topic") or src.get("theme") or _infer_topic(label, site)
     kr = category == "kr" or _is_korean_site(site)
     source_id = src.get("id", "")
 
@@ -154,6 +163,9 @@ def _collect_one_source(
                     kw_started = time.time()
                     try:
                         news = get_news_from_rss(display, feed_url, limit=lm)
+                        for item in news:
+                            item.setdefault("topic", topic)
+                            item.setdefault("category_group", category)
                         results.extend(news)
                         print(f"  🔎 [{label}] '{kw}' → {len(news)}건")
                         kw_elapsed = time.time() - kw_started
@@ -188,6 +200,9 @@ def _collect_one_source(
                 kw_started = time.time()
                 try:
                     news = get_news_from_rss(label, feed_url, limit=default_limit)
+                    for item in news:
+                        item.setdefault("topic", topic)
+                        item.setdefault("category_group", category)
                     results.extend(news)
                     print(f"  📰 [{label}] 최신 → {len(news)}건")
                     actual = len(news)
@@ -217,6 +232,9 @@ def _collect_one_source(
             kw_started = time.time()
             try:
                 news = get_news_from_rss(label, url, limit=default_limit)
+                for item in news:
+                    item.setdefault("topic", topic)
+                    item.setdefault("category_group", category)
                 results.extend(news)
                 print(f"  📰 [{label}] RSS → {len(news)}건")
                 actual = len(news)
@@ -299,6 +317,19 @@ def _report_source_done(
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("리포터 업데이트 실패 (무시): %s", exc)
+
+
+def _infer_topic(label: str, site: str = "") -> str:
+    text = f"{label} {site}".lower()
+    if any(k in text for k in ("nvidia", "robot", "physical", "ark", "autonomous")):
+        return "physical_ai"
+    if any(k in text for k in ("nuclear", "uranium", "smr", "nrc", "eia", "world nuclear")):
+        return "nuclear"
+    if "etf" in text or "ishares" in text or "vaneck" in text or "wisdomtree" in text:
+        return "etf"
+    if any(k in text for k in ("semi", "chip", "sia", "trendforce", "seeking alpha")):
+        return "semiconductor"
+    return "general"
 
 
 # ───────────────────────────────────────────────────────────

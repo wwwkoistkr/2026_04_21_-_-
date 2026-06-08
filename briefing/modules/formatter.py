@@ -23,6 +23,15 @@ def format_data_for_ai(data_list: List[Dict[str, str]], max_summary: int = 300) 
     lines: List[str] = []
     for idx, item in enumerate(data_list, 1):
         lines.append(f"[#{idx} 출처: {item.get('source','?')}]")
+        topic = (item.get("topic") or "").strip()
+        if topic:
+            lines.append(f"주제: {topic}")
+        published_at = (item.get("published_at") or "").strip()
+        freshness = (item.get("freshness") or "").strip()
+        age_hours = item.get("age_hours")
+        if published_at or freshness:
+            age_label = "" if age_hours is None else f", 나이: {age_hours}시간"
+            lines.append(f"발행시각: {published_at or '미확인'} ({freshness or 'unknown'}{age_label})")
         lines.append(f"제목: {item.get('title','').strip()}")
         summary = (item.get("summary") or "").strip()
         if summary:

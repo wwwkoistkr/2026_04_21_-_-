@@ -32,6 +32,7 @@ from briefing.collectors.custom_sources import collect_custom_sources
 from briefing.collectors.korean_news import collect_korean_news
 from briefing.collectors.run_reporter import RunReporter
 from briefing.collectors.us_news import get_us_news
+from briefing.collectors.freshness import is_recent_enough, is_text_stale_signal
 
 logger = logging.getLogger(__name__)
 
@@ -107,14 +108,21 @@ def collect_all_data(
     # ── 3) 중복 제거 (동일 링크 기준) ─────────────────────
     deduped: List[Dict[str, str]] = []
     seen_links = set()
+    stale_skipped = 0
     for item in all_news:
+        if not is_recent_enough(item) or is_text_stale_signal(item):
+            stale_skipped += 1
+            continue
         key = item.get("link", "").strip()
         if key and key in seen_links:
             continue
         seen_links.add(key)
         deduped.append(item)
 
-    print(f"\n✨ 중복 제거 후 최종: {len(deduped)}건 (원본 {len(all_news)}건)")
+    print(
+        f"\n✨ 최신성/중복 필터 후 최종: {len(deduped)}건 "
+        f"(원본 {len(all_news)}건, 오래된 후보 제외 {stale_skipped}건)"
+    )
 
     # v2.4.0: 리포터에 최종 결과 전송 (이력 기록)
     try:
