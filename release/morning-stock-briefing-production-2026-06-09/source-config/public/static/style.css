@@ -1,0 +1,610 @@
+/* Morning Stock AI — Briefing Center 커스텀 스타일 */
+
+/* Tailwind 가 로드되므로 여기서는 Tailwind 로 표현하기 번거로운 것들만 */
+
+/* ─────────────────────────────────────────────
+   🔴 [v2.2.2 핵심 수정] 모달 표시/숨김 컨트롤
+   ─────────────────────────────────────────────
+   Tailwind `hidden` 클래스 (display:none) 는
+   `sm:flex` 같은 미디어쿼리 규칙보다 specificity 가 낮아
+   PC 해상도에서 오버라이드되어 모달이 항상 보이는 버그가 있음.
+   → !important 와 all-media 적용으로 완전 차단.
+   ─────────────────────────────────────────────*/
+.modal-hidden,
+.modal-hidden[class] {
+  display: none !important;
+}
+
+.modal-visible,
+.modal-visible[class] {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 모바일 모달 풀스크린 (sm 이하) */
+@media (max-width: 639px) {
+  .modal-visible {
+    padding: 0 !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+  }
+  .modal-visible > div:first-child {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* 토스트도 동일한 패턴 보호 */
+.toast-hidden {
+  display: none !important;
+}
+.toast-visible {
+  display: block !important;
+}
+
+body {
+  font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Pretendard', -apple-system,
+    BlinkMacSystemFont, system-ui, 'Segoe UI', Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  background: #f1f5f9;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.source-item {
+  transition: all 0.15s ease;
+}
+.source-item:hover {
+  background: #f8fafc;
+  border-color: #93c5fd;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.badge-rss {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.badge-google_news {
+  background: #fef3c7;
+  color: #92400e;
+}
+.badge-youtube {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.badge-web {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ─────────────────────────────────────────────
+   📱 모바일 반응형 (v2.1)
+   ───────────────────────────────────────────── */
+
+/* 터치 타겟 최소 44px (Apple HIG 기준) */
+.touch-target {
+  min-height: 44px;
+}
+
+/* iOS safe-area 대응 */
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* iOS 입력창 줌인 방지 (16px 이상 강제) */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* 카테고리 탭 활성 상태 */
+.cat-tab.active {
+  color: #2563eb !important;
+  border-bottom-color: #2563eb !important;
+}
+
+/* 소스 카드 (v2) */
+.source-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 12px 14px;
+  transition: all 0.15s ease;
+  background: #fff;
+}
+.source-card:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08);
+}
+.source-card.disabled {
+  opacity: 0.55;
+  background: #f9fafb;
+}
+
+/* 검색어 태그 */
+.query-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 500;
+}
+.query-chip .limit {
+  font-size: 10px;
+  color: #64748b;
+}
+
+/* 모달 - 모바일에서 풀스크린 */
+@media (max-width: 640px) {
+  #editModal > div {
+    border-radius: 0;
+    max-height: 100vh;
+  }
+}
+
+/* PWA standalone 모드: 상태바 패딩 */
+@media (display-mode: standalone) {
+  body {
+    padding-top: max(env(safe-area-inset-top), 1rem);
+  }
+  header h1 {
+    font-size: 1.125rem;
+  }
+}
+
+/* 스크롤바 숨김 (카테고리 탭 가로스크롤) */
+#categoryTabs::-webkit-scrollbar {
+  display: none;
+}
+#categoryTabs {
+  scrollbar-width: none;
+}
+
+/* 토스트 애니메이션 */
+#toast {
+  animation: toastIn 0.2s ease-out;
+}
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@media (min-width: 640px) {
+  @keyframes toastIn {
+    from {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+}
+
+/* ─────────────────────────────────────────────
+   🖥️ 고해상도 디스플레이 대응 (v2.2)
+   ───────────────────────────────────────────── */
+
+/* 일반 PC (1280~1920px): 2단 그리드 */
+@media (min-width: 1280px) {
+  .max-w-6xl {
+    max-width: 1280px;
+  }
+}
+
+/* QHD (1920~2560px): 3단 그리드 */
+@media (min-width: 1920px) {
+  body {
+    font-size: 15px;
+  }
+  .max-w-6xl {
+    max-width: 1600px;
+  }
+  /* 소스 카드를 2단으로 표시 */
+  #sourceList {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  #sourceList > .source-card,
+  #sourceList > div {
+    margin: 0 !important;
+  }
+}
+
+/* 4K (2560~3840px) */
+@media (min-width: 2560px) {
+  html {
+    font-size: 18px;
+  }
+  .max-w-6xl {
+    max-width: 2000px;
+  }
+  #sourceList {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  /* 아이콘/이미지 선명도 강화 */
+  img, svg {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+  }
+}
+
+/* 8K (3840px+) — 극한 해상도 */
+@media (min-width: 3840px) {
+  html {
+    font-size: 22px;
+  }
+  .max-w-6xl {
+    max-width: 2800px;
+  }
+  #sourceList {
+    grid-template-columns: repeat(4, 1fr);
+  }
+  /* 두꺼운 테두리와 큰 터치 영역 */
+  .source-card {
+    padding: 20px 24px;
+    border-width: 2px;
+  }
+}
+
+/* Retina/HiDPI 대응 (배수 디스플레이) */
+@media
+  (-webkit-min-device-pixel-ratio: 2),
+  (min-resolution: 192dpi),
+  (min-resolution: 2dppx) {
+  /* 고밀도 디스플레이에서 텍스트 렌더링 최적화 */
+  body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: geometricPrecision;
+  }
+  /* 테두리 얇게 (1px = 0.5px) */
+  .source-card,
+  .badge,
+  input, select, textarea, button {
+    border-width: 0.5px;
+  }
+}
+
+/* ─────────────────────────────────────────────
+   🌗 다크 모드 자동 전환 (v2.2)
+   ───────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  body.dark-auto {
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+  body.dark-auto .source-card {
+    background: #1e293b;
+    border-color: #334155;
+  }
+}
+
+/* ─────────────────────────────────────────────
+   🔄 실시간 동기화 표시기 (v2.2)
+   ───────────────────────────────────────────── */
+.sync-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.1);
+  color: rgb(22, 163, 74);
+  font-weight: 500;
+}
+.sync-indicator .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: syncPulse 2s ease-in-out infinite;
+}
+@keyframes syncPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.3); }
+}
+
+/* ─────────────────────────────────────────────
+   🖨️ 프린트 최적화
+   ───────────────────────────────────────────── */
+@media print {
+  .no-print,
+  button,
+  #toast,
+  #editModal,
+  #confirmModal,
+  header .flex-shrink-0 {
+    display: none !important;
+  }
+  body {
+    background: white !important;
+  }
+  .source-card, section {
+    break-inside: avoid;
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+  }
+}
+
+/* ─────────────────────────────────────────────
+   🎯 접근성 (모션 감소 선호)
+   ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ─────────────────────────────────────────────
+   🔴 [v2.2.6 CRITICAL FIX] 다크모드 입력란 가시성
+   ─────────────────────────────────────────────
+   증상: OS/브라우저 다크모드에서 input/textarea 배경이 검정으로 렌더링되어
+         입력 텍스트가 보이지 않음 → "입력이 안 된다" 고 오인.
+   원인: Tailwind CDN 기본값은 color-scheme 을 OS 에 맡기는데,
+         user-agent stylesheet 가 다크모드에서 검은 배경을 부여함.
+   해결: 전체 페이지 color-scheme: light 강제 + 모든 input/textarea/select 에
+         명시적으로 흰 배경 + 어두운 글자색 강제 적용.
+   ───────────────────────────────────────────── */
+:root {
+  color-scheme: light;   /* 다크모드 OS 에서도 라이트 UI 유지 */
+}
+
+html, body {
+  background-color: #f3f4f6;  /* gray-100 */
+  color: #111827;              /* gray-900 */
+}
+
+/* 모든 텍스트 입력 요소에 라이트 테마 강제 */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+textarea,
+select {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+  -webkit-text-fill-color: #111827 !important;   /* iOS Safari 대응 */
+  caret-color: #1d4ed8;                          /* 커서 색상 (blue-700) */
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #9ca3af !important;   /* gray-400 */
+  opacity: 1 !important;       /* Firefox 기본 opacity 0.54 보정 */
+}
+
+/* 포커스 시에도 배경 유지 (자동완성 제안 등) */
+input:focus,
+textarea:focus,
+select:focus {
+  background-color: #ffffff !important;
+  color: #111827 !important;
+}
+
+/* Chrome autofill 이 연노란 배경을 씌우는 현상 방지 */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  -webkit-text-fill-color: #111827 !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* 비활성화된 input 도 회색이지만 읽을 수 있게 */
+input:disabled,
+textarea:disabled,
+select:disabled {
+  background-color: #f3f4f6 !important;  /* gray-100 */
+  color: #6b7280 !important;             /* gray-500 */
+  -webkit-text-fill-color: #6b7280 !important;
+}
+
+/* code 태그도 다크모드에서 배경이 어두워지는 문제 방지 */
+code {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+/* 어두운 배경 위에 있는 code (예: 진단 결과의 검증 명령어) 는 예외 */
+.bg-gray-900 code,
+code.bg-gray-900,
+pre code {
+  background-color: transparent !important;
+  color: inherit !important;
+}
+
+/* 다크모드 미디어 쿼리에서도 명시적으로 라이트 강제 */
+@media (prefers-color-scheme: dark) {
+  html, body {
+    background-color: #f3f4f6 !important;
+    color: #111827 !important;
+  }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  textarea,
+  select {
+    background-color: #ffffff !important;
+    color: #111827 !important;
+    -webkit-text-fill-color: #111827 !important;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+ * v2.3.2: 쿨다운 카운트다운 + 슬라이드바 스타일
+ * - 옵션 A: 버튼 내부 하단 얇은 바 (.cooldown-inner-bar)
+ * - 옵션 C: 버튼 아래 독립 두꺼운 바 (.cooldown-slide-container)
+ * - 마지막 3초 펄스 애니메이션 (.cooldown-pulsing)
+ * - 8K 대응: 퍼센트 기반 레이아웃 + rem 단위 최소폭 보장
+ * - 모바일 반응형: h-2 (8px) → h-[10px] (10px) on sm
+ * ═══════════════════════════════════════════════════════════════ */
+
+/* 쿨다운 버튼 공통 */
+.cooldown-btn {
+  transition: opacity 0.2s, box-shadow 0.3s;
+}
+
+.cooldown-btn:disabled {
+  cursor: not-allowed;
+}
+
+/* 옵션 A: 버튼 내부 하단 바 (기본은 높이 3px, 버튼과 일체형) */
+.cooldown-inner-bar {
+  pointer-events: none;
+  will-change: width;
+  /* 부드러운 감소 애니메이션을 위해 transition 은 위에서 인라인 지정 */
+}
+
+/* DRY RUN 버튼 내부 바: 파란색 */
+#btnTriggerDryRun .cooldown-inner-bar {
+  background: linear-gradient(90deg, #3b82f6 0%, #60a5fa 100%);
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.6);
+}
+
+/* 실제 발송 버튼 내부 바: 흰색 (주황 버튼 위에서 대비) */
+#btnTriggerNow .cooldown-inner-bar {
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
+}
+
+/* 옵션 C: 독립 슬라이드바 컨테이너 */
+.cooldown-slide-container {
+  animation: cooldownBarFadeIn 0.3s ease-out;
+}
+
+@keyframes cooldownBarFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 옵션 C: 슬라이드바 fill — width 는 JS 에서 인라인으로 제어 */
+.cooldown-slide-fill {
+  will-change: width, box-shadow, filter;
+}
+
+/* ─── 마지막 3초 펄스 애니메이션 ───
+ * "곧 해제됩니다" 시각적 신호
+ * - 밝기 증가 + 부드러운 깜박임
+ * - 색상 그라데이션이 초록빛으로 살짝 이동 (곧 사용 가능 느낌)
+ */
+@keyframes cooldownPulse {
+  0%, 100% {
+    filter: brightness(1);
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+  }
+  50% {
+    filter: brightness(1.4);
+    box-shadow: 0 0 16px rgba(34, 197, 94, 0.9);
+  }
+}
+
+/* DRY RUN 펄스: 파랑 → 초록 전환 */
+.cooldown-slide-fill.cooldown-pulsing-dry {
+  animation: cooldownPulse 0.6s ease-in-out infinite;
+  background: linear-gradient(90deg, #3b82f6 0%, #22c55e 100%) !important;
+}
+
+/* 실제 발송 펄스: 주황 → 초록 전환 */
+.cooldown-slide-fill.cooldown-pulsing-real {
+  animation: cooldownPulse 0.6s ease-in-out infinite;
+  background: linear-gradient(90deg, #f97316 0%, #22c55e 100%) !important;
+}
+
+/* 버튼 내부 바도 마지막 3초에는 펄스 */
+.cooldown-inner-bar.cooldown-pulsing-inner {
+  animation: cooldownPulseInner 0.6s ease-in-out infinite;
+}
+
+@keyframes cooldownPulseInner {
+  0%, 100% { filter: brightness(1); opacity: 0.9; }
+  50%      { filter: brightness(1.5); opacity: 1; }
+}
+
+/* ─── 8K 초고해상도 최적화 ───
+ * 3840px 이상 디스플레이에서 바가 너무 얇아 보이지 않도록 최소 높이 보장
+ */
+@media (min-width: 3840px) {
+  .cooldown-slide-container .relative {
+    height: 14px !important;  /* 8K 에서 더 두껍게 */
+  }
+  .cooldown-inner-bar {
+    height: 5px !important;
+  }
+  #dryRunCooldownText,
+  #realSendCooldownText {
+    font-size: 1rem;
+  }
+}
+
+/* ─── 모바일 (≤640px) 세부 조정 ─── */
+@media (max-width: 640px) {
+  .cooldown-slide-container {
+    /* 모바일에서 버튼 영역과 간격 최소화 */
+    margin-top: 0.5rem;
+  }
+  .cooldown-btn .btn-countdown {
+    font-size: 0.7rem;
+  }
+}
+
+/* ─── 접근성: 모션 줄이기 선호 ─── */
+@media (prefers-reduced-motion: reduce) {
+  .cooldown-slide-fill,
+  .cooldown-inner-bar {
+    transition: width 0.2s linear !important;
+  }
+  .cooldown-slide-fill.cooldown-pulsing-dry,
+  .cooldown-slide-fill.cooldown-pulsing-real,
+  .cooldown-inner-bar.cooldown-pulsing-inner {
+    animation: none !important;
+    filter: brightness(1.2);
+  }
+}

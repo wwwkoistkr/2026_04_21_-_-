@@ -1,0 +1,61 @@
+name: Morning Stock AI — 2/3 Summarize
+
+# ═══════════════════════════════════════════════════════════════
+# v2.6.0: 3단계 파이프라인 중 Stage 2 (AI 요약)
+# ─────────────────────────────────────────────────────────────
+#  Cloudflare KV 에서 수집 결과를 읽어 Gemini 로 요약 후 다시 KV 에 저장.
+#  순차 모드(SUMMARY_MODE=sequential)로 호출 간격 6초 → RPM 한계 회피.
+# ═══════════════════════════════════════════════════════════════
+
+on:
+  schedule:
+    # 06:10 KST (= 21:10 UTC) — collect(06:00) 완료 후 10분 여유
+    - cron: '10 21 * * *'
+  workflow_dispatch: {}
+  # v2.7.0 (2026-04-24): workflow_run 트리거 제거.
+  # 사유: schedule + workflow_run 이중 트리거로 하루 2~3회 중복 실행되어
+  #       수신자에게 같은 브리핑이 3통씩 발송되는 버그 발생 (Run #9/#10/#11).
+  # 대신: Collect(06:00)/Summarize(06:10)/Send(06:25) 각자 독립된 schedule 만 사용.
+  # KV 에 저장된 직전 성공본을 읽으므로 앞단 실패해도 뒷단이 빈 결과로 돌지는 않음.
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run summarize stage
+        env:
+          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY:   ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL:  ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL:     ${{ secrets.OPENAI_MODEL }}
+          BRIEFING_ADMIN_API:   ${{ secrets.BRIEFING_ADMIN_API }}
+          BRIEFING_READ_TOKEN:  ${{ secrets.BRIEFING_READ_TOKEN }}
+          BRIEFING_REPORT_TOKEN: ${{ secrets.BRIEFING_REPORT_TOKEN }}
+          # v2.6.0: 순차 호출 + 6초 간격 → 무료 티어 10 RPM 안전 통과
+          SUMMARY_MODE:           ${{ secrets.SUMMARY_MODE || 'sequential' }}
+          SUMMARY_CALL_DELAY_SEC: ${{ secrets.SUMMARY_CALL_DELAY_SEC || '6' }}
+        run: python main.py summarize
+
+      - name: Upload summary backup (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: summary-backup
+          path: /tmp/briefing_backup/summary_*.md
+          if-no-files-found: ignore
+          retention-days: 7

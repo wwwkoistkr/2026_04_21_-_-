@@ -1,0 +1,52 @@
+name: Morning Stock AI — 1/3 Collect
+
+# ═══════════════════════════════════════════════════════════════
+# v2.6.0: 3단계 파이프라인 중 Stage 1 (수집)
+# ─────────────────────────────────────────────────────────────
+#  이 단계는 AI API 를 호출하지 않으므로 할당량 제약 없이 여러 번 재실행 가능.
+#  수집 결과는 Cloudflare KV (pipeline:collected:YYYYMMDD) 에 저장되어
+#  다음 단계(02_summarize)가 읽어서 사용.
+# ═══════════════════════════════════════════════════════════════
+
+on:
+  schedule:
+    # 매일 06:00 KST (= 21:00 UTC) — 02_summarize(06:10), 03_send(06:25) 순차
+    - cron: '0 21 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run collect stage
+        env:
+          BRIEFING_ADMIN_API:   ${{ secrets.BRIEFING_ADMIN_API }}
+          BRIEFING_READ_TOKEN:  ${{ secrets.BRIEFING_READ_TOKEN }}
+          BRIEFING_REPORT_TOKEN: ${{ secrets.BRIEFING_REPORT_TOKEN }}
+          # 스크래핑 설정 (기본값 사용, 필요 시 secrets 로 덮어쓰기)
+          ARTICLE_SCRAPE_ENABLED: ${{ secrets.ARTICLE_SCRAPE_ENABLED || 'true' }}
+        run: python main.py collect
+
+      - name: Upload collect backup (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collect-backup
+          path: /tmp/briefing_backup/collected_*.json
+          if-no-files-found: ignore
+          retention-days: 3

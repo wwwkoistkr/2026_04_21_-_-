@@ -1,0 +1,64 @@
+name: Morning Stock AI — Daily Briefing (Legacy Single-Stage)
+
+# ═══════════════════════════════════════════════════════════════
+# v2.6.0 부터는 3단계 파이프라인(01_collect, 02_summarize, 03_send)이
+# 기본 경로입니다.
+# 이 레거시 단일 단계 워크플로우는 "지금 발송" 버튼 / 긴급 수동 테스트
+# 용도로만 workflow_dispatch 로 트리거할 수 있도록 스케줄은 제거했습니다.
+# ═══════════════════════════════════════════════════════════════
+
+on:
+  # v2.6.0: schedule 제거 — 3단계 파이프라인이 cron 을 담당.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "DRY_RUN(true 이면 메일 발송 생략)"
+        required: false
+        default: "false"
+
+jobs:
+  run-briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run briefing pipeline
+        env:
+          GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY:       ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL:      ${{ secrets.OPENAI_BASE_URL }}
+          OPENAI_MODEL:         ${{ secrets.OPENAI_MODEL }}
+          EMAIL_SENDER:         ${{ secrets.EMAIL_SENDER }}
+          EMAIL_APP_PASSWORD:   ${{ secrets.EMAIL_APP_PASSWORD }}
+          EMAIL_RECIPIENTS:     ${{ secrets.EMAIL_RECIPIENTS }}
+          YOUTUBE_API_KEY:      ${{ secrets.YOUTUBE_API_KEY }}
+          THELEC_YOUTUBE_CHANNEL_ID: ${{ secrets.THELEC_YOUTUBE_CHANNEL_ID }}
+          BRIEFING_ADMIN_API:   ${{ secrets.BRIEFING_ADMIN_API }}
+          BRIEFING_READ_TOKEN:  ${{ secrets.BRIEFING_READ_TOKEN }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          SUMMARY_MODE:           ${{ secrets.SUMMARY_MODE || 'sequential' }}
+          SUMMARY_CALL_DELAY_SEC: ${{ secrets.SUMMARY_CALL_DELAY_SEC || '6' }}
+        run: python main.py all
+
+      - name: Upload HTML preview (dry run only)
+        if: ${{ always() && github.event.inputs.dry_run == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: briefing-preview
+          path: /tmp/briefing_latest.html
+          if-no-files-found: ignore
