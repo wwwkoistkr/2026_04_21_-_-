@@ -48,6 +48,7 @@ interface NewsSource {
   type: SourceType           // rss / google_news / web  (v2.5.3: youtube 제거)
   url: string                // (type=rss/web 일 때) 직접 URL
   site?: string              // (type=google_news 일 때) site:xxxx 용 도메인
+  topic?: string             // semiconductor / physical_ai / nuclear / etf / power / general
   queries: SearchQuery[]     // 검색어 배열 (비어있으면 최신순 수집)
   defaultLimit: number       // queries 가 비어있을 때 기본 수집 개수
   enabled: boolean
@@ -151,12 +152,33 @@ const US_ETF_PRESET: SearchQuery[] = [
   { keyword: 'semiconductor ETF', limit: 3 },
 ]
 
+const PHYSICAL_AI_PRESET: SearchQuery[] = [
+  { keyword: 'physical AI robotics', limit: 3 },
+  { keyword: 'NVIDIA robotics humanoid', limit: 3 },
+  { keyword: 'autonomous robots AI', limit: 2 },
+]
+
+const NUCLEAR_PRESET: SearchQuery[] = [
+  { keyword: 'small modular reactor', limit: 3 },
+  { keyword: 'SMR nuclear power', limit: 3 },
+  { keyword: 'uranium supply', limit: 2 },
+]
+
+const AI_POWER_PRESET: SearchQuery[] = [
+  { keyword: 'AI data center power', limit: 3 },
+  { keyword: 'grid electricity demand AI', limit: 2 },
+  { keyword: 'nuclear power data center', limit: 2 },
+]
+
 // 사용자 UI 에서 보여줄 프리셋 카탈로그 (클라이언트가 /api/admin/presets 로 조회)
 export const QUERY_PRESETS = [
   { id: 'kr_securities', label: '🇰🇷 한국 증권 (반도체·HBM·코스피)', queries: KR_SECURITIES_PRESET },
   { id: 'kr_it', label: '🇰🇷 한국 IT (AI·엔비디아·TSMC)', queries: KR_IT_PRESET },
   { id: 'us_semi', label: '🌎 US Semi (semiconductor·AI chip·HBM)', queries: US_SEMI_PRESET },
   { id: 'us_etf', label: '🌎 US ETF (SMH·SOXX·semiconductor ETF)', queries: US_ETF_PRESET },
+  { id: 'physical_ai', label: '🤖 Physical AI (robotics·humanoid·autonomous)', queries: PHYSICAL_AI_PRESET },
+  { id: 'nuclear', label: '⚛️ Nuclear/SMR (uranium·reactor·power)', queries: NUCLEAR_PRESET },
+  { id: 'ai_power', label: '⚡ AI Power (data center·grid·nuclear)', queries: AI_POWER_PRESET },
   { id: 'clear', label: '🗑️ 검색어 비우기 (사이트 최신순 수집)', queries: [] },
 ]
 
@@ -178,20 +200,30 @@ function buildSeedSources(): NewsSource[] {
 
   return [
     // ── 🇰🇷 한국 6개 (증권 3 + IT 3) ──
-    mk({ label: '한국경제 (증권)', category: 'kr', type: 'google_news', site: 'hankyung.com', queries: KR_SECURITIES_PRESET, url: 'https://hankyung.com' }),
-    mk({ label: '매일경제 (증권)', category: 'kr', type: 'google_news', site: 'mk.co.kr', queries: KR_SECURITIES_PRESET, url: 'https://mk.co.kr' }),
-    mk({ label: '머니투데이 (증권)', category: 'kr', type: 'google_news', site: 'mt.co.kr', queries: KR_SECURITIES_PRESET, url: 'https://mt.co.kr' }),
-    mk({ label: '한국경제 (IT)', category: 'kr', type: 'google_news', site: 'hankyung.com', queries: KR_IT_PRESET, url: 'https://hankyung.com' }),
-    mk({ label: '매일경제 (IT)', category: 'kr', type: 'google_news', site: 'mk.co.kr', queries: KR_IT_PRESET, url: 'https://mk.co.kr' }),
-    mk({ label: '조선비즈', category: 'kr', type: 'google_news', site: 'biz.chosun.com', queries: KR_SECURITIES_PRESET, url: 'https://biz.chosun.com' }),
+    mk({ label: '한국경제 (증권)', category: 'kr', type: 'google_news', site: 'hankyung.com', topic: 'semiconductor', queries: KR_SECURITIES_PRESET, url: 'https://hankyung.com' }),
+    mk({ label: '매일경제 (증권)', category: 'kr', type: 'google_news', site: 'mk.co.kr', topic: 'semiconductor', queries: KR_SECURITIES_PRESET, url: 'https://mk.co.kr' }),
+    mk({ label: '머니투데이 (증권)', category: 'kr', type: 'google_news', site: 'mt.co.kr', topic: 'semiconductor', queries: KR_SECURITIES_PRESET, url: 'https://mt.co.kr' }),
+    mk({ label: '한국경제 (IT)', category: 'kr', type: 'google_news', site: 'hankyung.com', topic: 'semiconductor', queries: KR_IT_PRESET, url: 'https://hankyung.com' }),
+    mk({ label: '매일경제 (IT)', category: 'kr', type: 'google_news', site: 'mk.co.kr', topic: 'semiconductor', queries: KR_IT_PRESET, url: 'https://mk.co.kr' }),
+    mk({ label: '조선비즈', category: 'kr', type: 'google_news', site: 'biz.chosun.com', topic: 'semiconductor', queries: KR_SECURITIES_PRESET, url: 'https://biz.chosun.com' }),
 
     // ── 🌎 미국 6개 (반도체 3 + ETF/거시 3) ──
-    mk({ label: 'Reuters', category: 'us', type: 'google_news', site: 'reuters.com', queries: US_SEMI_PRESET, url: 'https://reuters.com' }),
-    mk({ label: 'Bloomberg', category: 'us', type: 'google_news', site: 'bloomberg.com', queries: US_SEMI_PRESET, url: 'https://bloomberg.com' }),
-    mk({ label: 'Seeking Alpha', category: 'us', type: 'google_news', site: 'seekingalpha.com', queries: US_SEMI_PRESET, url: 'https://seekingalpha.com' }),
-    mk({ label: 'Seeking Alpha (ETF)', category: 'us', type: 'google_news', site: 'seekingalpha.com', queries: US_ETF_PRESET, url: 'https://seekingalpha.com' }),
-    mk({ label: 'ETF.com', category: 'us', type: 'google_news', site: 'etf.com', queries: US_ETF_PRESET, url: 'https://etf.com' }),
-    mk({ label: 'Morningstar', category: 'us', type: 'google_news', site: 'morningstar.com', queries: US_ETF_PRESET, url: 'https://morningstar.com' }),
+    mk({ label: 'Reuters', category: 'us', type: 'google_news', site: 'reuters.com', topic: 'semiconductor', queries: US_SEMI_PRESET, url: 'https://reuters.com' }),
+    mk({ label: 'Bloomberg', category: 'us', type: 'google_news', site: 'bloomberg.com', topic: 'semiconductor', queries: [...US_SEMI_PRESET, ...AI_POWER_PRESET].slice(0, 5), url: 'https://bloomberg.com' }),
+    mk({ label: 'Seeking Alpha', category: 'us', type: 'google_news', site: 'seekingalpha.com', topic: 'semiconductor', queries: US_SEMI_PRESET, url: 'https://seekingalpha.com' }),
+    mk({ label: 'Seeking Alpha (ETF)', category: 'us', type: 'google_news', site: 'seekingalpha.com', topic: 'etf', queries: US_ETF_PRESET, url: 'https://seekingalpha.com' }),
+    mk({ label: 'ETF.com', category: 'us', type: 'google_news', site: 'etf.com', topic: 'etf', queries: US_ETF_PRESET, url: 'https://etf.com' }),
+    mk({ label: 'Morningstar', category: 'us', type: 'google_news', site: 'morningstar.com', topic: 'etf', queries: US_ETF_PRESET, url: 'https://morningstar.com' }),
+
+    // ── 🤖 Physical AI / ⚛️ nuclear / ⚡ AI power expansion ──
+    mk({ label: 'NVIDIA Newsroom', category: 'us', type: 'google_news', site: 'nvidianews.nvidia.com', topic: 'physical_ai', queries: PHYSICAL_AI_PRESET, url: 'https://nvidianews.nvidia.com' }),
+    mk({ label: 'The Robot Report', category: 'us', type: 'google_news', site: 'therobotreport.com', topic: 'physical_ai', queries: PHYSICAL_AI_PRESET, url: 'https://therobotreport.com' }),
+    mk({ label: 'IEEE Spectrum Robotics', category: 'us', type: 'google_news', site: 'spectrum.ieee.org', topic: 'physical_ai', queries: PHYSICAL_AI_PRESET, url: 'https://spectrum.ieee.org' }),
+    mk({ label: 'U.S. EIA', category: 'us', type: 'google_news', site: 'eia.gov', topic: 'nuclear', queries: NUCLEAR_PRESET, url: 'https://www.eia.gov' }),
+    mk({ label: 'U.S. NRC', category: 'us', type: 'google_news', site: 'nrc.gov', topic: 'nuclear', queries: NUCLEAR_PRESET, url: 'https://www.nrc.gov' }),
+    mk({ label: 'World Nuclear News', category: 'us', type: 'google_news', site: 'world-nuclear-news.org', topic: 'nuclear', queries: NUCLEAR_PRESET, url: 'https://world-nuclear-news.org' }),
+    mk({ label: 'ARK Invest', category: 'us', type: 'google_news', site: 'ark-invest.com', topic: 'physical_ai', queries: PHYSICAL_AI_PRESET, url: 'https://ark-invest.com' }),
+    mk({ label: 'WisdomTree', category: 'us', type: 'google_news', site: 'wisdomtree.com', topic: 'etf', queries: [...US_ETF_PRESET, ...PHYSICAL_AI_PRESET].slice(0, 5), url: 'https://wisdomtree.com' }),
 
     // ── v2.5.3: 유튜브 소스 제거됨 ──
   ]
@@ -2625,6 +2657,7 @@ app.post('/api/admin/sources', async (c) => {
   const body = await c.req.json().catch(() => ({}))
   const label = String(body.label ?? '').trim()
   const url = String(body.url ?? '').trim()
+  const topic = String(body.topic ?? '').trim()
   const rawQueries = Array.isArray(body.queries) ? body.queries : []
   const defaultLimit = Math.max(1, Math.min(10, Number(body.defaultLimit) || 5))
 
@@ -2668,6 +2701,7 @@ app.post('/api/admin/sources', async (c) => {
     type,
     url,
     site: extractSite(url),
+    topic: topic || undefined,
     queries,
     defaultLimit,
     enabled: true,
@@ -2690,6 +2724,7 @@ app.patch('/api/admin/sources/:id', async (c) => {
   if (typeof body.enabled === 'boolean') target.enabled = body.enabled
   if (typeof body.label === 'string' && body.label.trim()) target.label = body.label.trim()
   if (typeof body.site === 'string') target.site = body.site.trim() || undefined
+  if (typeof body.topic === 'string') target.topic = body.topic.trim() || undefined
   if (typeof body.url === 'string' && body.url.trim()) {
     const newUrl = body.url.trim()
     // v2.5.3: 유튜브 URL 차단

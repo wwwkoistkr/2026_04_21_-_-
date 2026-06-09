@@ -20,6 +20,14 @@ from typing import Dict, List, Optional
 import feedparser
 import requests
 
+from briefing.collectors.freshness import (
+    allow_undated_articles,
+    freshness_metadata,
+    is_text_stale_signal,
+    max_article_age_hours,
+    parse_entry_datetime,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -274,9 +282,21 @@ def get_news_from_rss(
                 enrich_summary = None
                 _scrape_enabled = False
 
-            for entry in feed.entries[:limit]:
+            for entry in feed.entries:
                 title = getattr(entry, "title", "").strip()
                 link = getattr(entry, "link", "").strip()
+                published_dt = parse_entry_datetime(entry)
+                fresh = freshness_metadata(published_dt)
+                if fresh["freshness"] == "stale":
+                    logger.info(
+                        "[freshness] skip stale article (%s, %sh): %s",
+                        source_name, fresh.get("age_hours"), title[:80],
+                    )
+                    continue
+                if fresh["freshness"] == "undated" and not allow_undated_articles():
+                    logger.info("[freshness] skip undated article: %s", title[:80])
+                    continue
+
                 summary_raw = (
                     getattr(entry, "summary", None)
                     or getattr(entry, "description", None)
@@ -294,13 +314,26 @@ def get_news_from_rss(
                         # 스크래핑 실패는 조용히 무시 (원본 cleaned 유지)
                         logger.debug("[scrape] enrich 실패 %s: %s", link, exc)
 
-                articles.append(
-                    {
-                        "source": source_name,
-                        "title": title,
-                        "link": link,
-                        "summary": cleaned,
-                    }
+                item = {
+                    "source": source_name,
+                    "title": title,
+                    "link": link,
+                    "summary": cleaned,
+                    **fresh,
+                }
+                if is_text_stale_signal(item):
+                    item["freshness"] = "stale_signal"
+                    item["stale_reason"] = "title or summary mentions older year"
+                    logger.info("[freshness] skip old-year signal: %s", title[:80])
+                    continue
+
+                articles.append(item)
+                if len(articles) >= limit:
+                    break
+            if not articles:
+                logger.warning(
+                    "[%s] 최신성 필터 후 기사 0건 (max_age=%sh, undated=%s)",
+                    source_name, max_article_age_hours(), allow_undated_articles(),
                 )
             return articles
 

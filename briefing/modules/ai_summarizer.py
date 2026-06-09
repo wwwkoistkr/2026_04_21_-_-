@@ -128,6 +128,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from briefing.collectors.freshness import is_recent_enough, is_text_stale_signal
+
 logger = logging.getLogger(__name__)
 
 # ─── 모델 설정 ─────────────────────────────────────────────
@@ -203,6 +205,20 @@ def _today_iso_str() -> str:
     return _now_kst().strftime("%Y-%m-%d")
 
 
+def _filter_fresh_news(news_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep only fresh candidates before ranking/summarization."""
+    fresh: List[Dict[str, Any]] = []
+    dropped = 0
+    for item in news_list:
+        if is_recent_enough(item) and not is_text_stale_signal(item):
+            fresh.append(item)
+        else:
+            dropped += 1
+    if dropped:
+        logger.warning("Freshness filter dropped %d stale candidates before summarization.", dropped)
+    return fresh
+
+
 # ════════════════════════════════════════════════════════════
 # 단계 1) 랭킹 — 수집된 N건 중 상위 10개 선별
 # ════════════════════════════════════════════════════════════
@@ -213,9 +229,16 @@ def _build_ranking_prompt(news_list: List[Dict[str, str]]) -> str:
     lines = [f"=== 후보 뉴스 목록 (총 {len(news_list)}건) ==="]
     for i, n in enumerate(news_list):
         src = n.get("source", "")
+        topic = n.get("topic", "general")
+        freshness = n.get("freshness", "unknown")
+        published_at = n.get("published_at") or ""
+        age_hours = n.get("age_hours")
+        age_label = f"{age_hours}h" if age_hours is not None else "age_unknown"
         title = (n.get("title") or "").strip()[:120]
         summary_snippet = (n.get("summary") or "").strip().replace("\n", " ")[:200]
-        lines.append(f"[{i}] ({src}) {title}")
+        lines.append(f"[{i}] ({src}) [{topic}] [{freshness} {age_label}] {title}")
+        if published_at:
+            lines.append(f"    published_at: {published_at}")
         if summary_snippet:
             lines.append(f"    요약: {summary_snippet}")
 
@@ -226,6 +249,12 @@ def _build_ranking_prompt(news_list: List[Dict[str, str]]) -> str:
 
 아래 후보 뉴스 {len(news_list)}건 중, **반도체 또는 원자력 테마**에 해당하는 뉴스만 선별하여
 **핵심 뉴스 정확히 {TARGET_NEWS_COUNT}개**를 순위를 매겨 선정해 주세요.
+
+## 최신성 필수 규칙
+- 오늘은 {_today_iso_str()} KST입니다. `freshness`가 `today` 또는 `recent`인 기사만 우선 선정하세요.
+- 2024년, 2025년처럼 과거 연도 사건을 다루는 후보는 2026년 현재 새 업데이트가 명확하지 않으면 제외하세요.
+- `stale` 후보는 선정하지 마세요. `undated` 후보는 날짜가 확인된 최신 대안이 부족할 때만 낮은 우선순위로 사용하세요.
+- 반도체, Physical AI/로보틱스, 원전/SMR/우라늄, AI 데이터센터 전력, ETF 자금 흐름을 균형 있게 우선 검토하세요.
 
 ## 🚨 v2.9.0 엄격 카테고리 필터 (반드시 준수)
 **오직 아래 2개 카테고리만 선정**하세요. 그 외는 **전량 배제**합니다.
@@ -877,6 +906,9 @@ def _build_item_prompt(item: Dict[str, Any], weak_axes: Optional[List[str]] = No
 
 ## 원본 뉴스 정보
 - 출처: {orig.get("source", "")}
+- 주제: {orig.get("topic", "general")}
+- 발행시각: {orig.get("published_at", "미확인")}
+- 최신성: {orig.get("freshness", "unknown")} / {orig.get("age_hours", "age_unknown")}h
 - 제목: {orig.get("title", "")}
 - 본문: {orig.get("summary", "")[:body_chars]}
 - 링크: {orig.get("link", "")}
@@ -1750,6 +1782,10 @@ def summarize_with_gemini(
     str : 마크다운 브리핑
     """
     key = api_key or os.getenv("GEMINI_API_KEY")
+    if news_list:
+        news_list = _filter_fresh_news(news_list)
+        if not news_list:
+            raise RuntimeError("최신성 필터 후 요약 대상 뉴스가 없습니다.")
 
     # ===== Gemini 경로 (news_list 필수) =====
     if key and news_list:
@@ -1855,8 +1891,9 @@ def summarize_with_gemini(
 
 
 def _fallback_rule_based_briefing(news_list: List[Dict[str, str]]) -> str:
-    """최후의 폴백 — AI 없이 원본 RSS 데이터만으로 마크다운 작성."""
+    """최후의 폴백 – AI 없이 원본 RSS 데이터만으로 마크다운 작성."""
     today = _today_kr_str()
+    news_list = _filter_fresh_news(news_list)
     top = news_list[:TARGET_NEWS_COUNT]
 
     warning = (
@@ -1878,8 +1915,12 @@ def _fallback_rule_based_briefing(news_list: List[Dict[str, str]]) -> str:
         summary = (n.get("summary") or "")[:300]
         source = n.get("source", "")
         link = n.get("link", "")
+        topic = n.get("topic", "general")
+        published_at = n.get("published_at") or "미확인"
+        freshness = n.get("freshness", "unknown")
         parts.append(f"### {i}. {title}\n")
         parts.append(f"- **출처**: {source}\n")
+        parts.append(f"- **주제/최신성**: {topic} · {published_at} · {freshness}\n")
         if summary:
             parts.append(f"- **요약**: {summary}\n")
         parts.append(f"- **원문 링크**: [{source}]({link})\n\n")

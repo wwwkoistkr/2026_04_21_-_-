@@ -336,6 +336,7 @@
               <div class="flex items-center gap-2 flex-wrap mb-1">
                 <strong class="text-gray-800 truncate">${escapeHtml(s.label)}</strong>
                 ${badge(s.type, s.enabled)}
+                ${s.topic ? `<span class="text-xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">${escapeHtml(s.topic)}</span>` : ''}
                 ${s.builtin ? '<span class="text-xs text-gray-400">[기본]</span>' : ''}
                 <span class="text-xs text-gray-400 ml-auto">예상 ${totalExpected}건/일</span>
               </div>
