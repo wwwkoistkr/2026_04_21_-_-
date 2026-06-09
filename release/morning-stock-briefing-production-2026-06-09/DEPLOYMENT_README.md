@@ -50,7 +50,36 @@ Required Cloudflare settings:
 
 ## 2. Run Python Pipeline
 
-Open PowerShell in `python-pipeline` and run setup once:
+The easiest way on Windows is to use the `.bat` files in this release folder.
+They handle Korean text and parentheses in the path automatically.
+
+Run setup once:
+
+```powershell
+.\RUN_SETUP.bat
+```
+
+Then run stages:
+
+```powershell
+.\RUN_COLLECT.bat
+.\RUN_SUMMARIZE.bat
+.\RUN_SEND.bat
+```
+
+Or run everything:
+
+```powershell
+.\RUN_ALL.bat
+```
+
+If you prefer PowerShell manually, always wrap the path in quotes:
+
+```powershell
+cd "E:\2026_06_08_(주식알리미)\webapp\release\morning-stock-briefing-production-2026-06-09\python-pipeline"
+```
+
+Then run setup once:
 
 ```powershell
 .\setup-python.ps1
@@ -94,4 +123,3 @@ Before packaging, `npm run build` completed successfully and produced:
 - `cloudflare-pages/dist/_worker.js`
 - `cloudflare-pages/dist/_routes.json`
 - static admin/PWA assets under `cloudflare-pages/dist/static/`
-
