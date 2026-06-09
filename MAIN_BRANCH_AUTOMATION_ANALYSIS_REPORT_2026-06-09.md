@@ -118,3 +118,20 @@ archive 브랜치 전체를 main에 덮어쓰지 않고, 아래 기능만 선별
 3. `daily_02_summarize.yml`을 수동 실행해 요약이 생성되는지 확인한다.
 4. `daily_03_send.yml`은 먼저 `dry_run=true`로 실행해 HTML preview를 확인한다.
 5. 문제가 없으면 다음날 자동 스케줄을 관찰한다.
+
+## 8. 터미널에서 수동 트리거하는 방법
+
+`/api/admin/trigger-now`는 PowerShell 명령어가 아니라 웹 API 경로다.
+따라서 터미널에서 직접 `/api/admin/trigger-now`를 입력하면 `CommandNotFoundException`이 발생한다.
+
+터미널에서 수동 실행하려면 다음 helper 스크립트를 사용한다.
+
+```powershell
+cd "E:\2026_06_08_(주식알리미)\webapp"
+.\tools\trigger-now.ps1 -Stage collect
+.\tools\trigger-now.ps1 -Stage summarize
+.\tools\trigger-now.ps1 -Stage send -DryRun
+```
+
+브라우저 관리자 화면과 동일하게 `ADMIN_PASSWORD`로 로그인한 뒤
+`POST /api/admin/trigger-now`를 호출한다.
